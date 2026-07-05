@@ -1,0 +1,618 @@
+// constants/translations.js — Traduções e conteúdo de documentação
+
+export const translations = {
+  pt: {
+    title: "ARTHWIND SUITE", subtitle: "Ferramenta de Automação de Dados multiplataforma",
+    modules: [
+      { id: 1,  label: "Organizar Fotos via CSV", icon: "organize", short: "S&R via CSV",      group: "Arthdrone" },
+      { id: 10, label: "Gerar CSV S&R via JSON",   icon: "json",     short: "JSON para CSV S&R", group: "Arthdrone" },
+      { id: 2,  label: "Processar JSON do Drone",   icon: "json",     short: "JSON para CSVs",    group: "Arthdrone" },
+      { id: 3,  label: "Organizar Fotos via JSON",  icon: "photos",   short: "Fotos via JSON",    group: "Arthdrone" },
+      { id: 11, label: "Recriar CSV via GPS",   icon: "organize", short: "Recuperar de GPS", group: "Arthdrone" },
+      { id: 6, label: "Dividir Voo (Blade Split)",        icon: "split",    short: "Dividir pás", group: "Arthdrone" },
+      { id: 7, label: "Restaurar Alturas (Z=0)",      icon: "gps",      short: "Restaurar Location", group: "Arthdrone" },
+      { id: 8, label: "Recuperar Fotos Perdidas",  icon: "photos",   short: "Fotos fantasma (SD)", group: "Arthdrone" },
+      { id: 12, label: "Gerar CSV Arthnex (Upload Interno)",    icon: "packer",   short: "CSV upload interno",   group: "Arthbot" },
+      { id: 19, label: "Arthnex Uploader",    icon: "upload",   short: "Upload via API (corrigido)",   group: "Arthbot" },
+      { id: 13, label: "Padronizar GoPro para Arthnex", icon: "organize", short: "Renomear pelo nome",    group: "Arthbot" },
+      { id: 15, label: "Calibrar Z GoPro RAW", icon: "gps",      short: "Passo fixo 500mm", group: "Arthbot" },
+      { id: 4, label: "Converter Delimitador de CSV",     icon: "csv",      short: "CSV para Excel", group: "Ferramentas" },
+      { id: 5, label: "Gerar Relatório de Altitudes",  icon: "gps",      short: "Altitude relativa", group: "Ferramentas" },
+      { id: 14, label: "Vincular Fotos a CSV", icon: "organize", short: "Match fotos/metadados", group: "Ferramentas" },
+      { id: 17, label: "Auditar Planilha Smartsheet",  icon: "organize", short: "Auditoria Smartsheet",  group: "Ferramentas" },
+      // Módulo 18 (Processar Vídeo 360°) arquivado — pywebview não dava o controle de UX
+      // necessário. Código 100% preservado (ver tag git archive/camera360-pywebview);
+      // descomentar esta linha + os pontos equivalentes em ModuleForm.jsx e App.jsx restaura.
+      // { id: 18, label: "Processar Vídeo 360° (Arthbot)", icon: "photos",   short: "Calibração e Corte", group: "Arthbot" },
+      { id: 16, label: "Horizon Processor",    icon: "file",     short: "Empacotamento Horizon", group: "Plataforma do Cliente" },
+      { id: 9, label: "Documentação",     icon: "docs",     short: "Manual passo a passo", group: "Suporte" },
+    ],
+    fields: {
+      1: {
+        title: "1. Organizar Imagens S&R",
+        desc: "Lê o CSV da plataforma e organiza as fotos em OUTPUT/Blade/Region",
+        inputs: [
+          { inputId: "csv_file",   label: "Arquivo CSV",    placeholder: "Clique para selecionar o CSV da plataforma", type: "file",   fileType: "csv",
+            hint: "CSV exportado do Image Uploader da plataforma (ou gerado pelo Módulo 2 / 10)" },
+          { inputId: "photos_dir", label: "Pasta de Fotos", placeholder: "Clique para selecionar a pasta com as fotos", type: "folder",
+            hint: "Pasta raiz com os JPGs brutos do voo (ex: D:\\DCIM\\)" },
+        ],
+        options: [
+          { optionId: "dry_run", label: "Dry-run", choices: ["Não", "Sim"],
+            desc: "Simula a execução sem mover nenhum arquivo — recomendado na primeira vez" },
+        ],
+        action: "Organizar Imagens",
+      },
+      2: {
+        title: "2. Processar JSON",
+        desc: "Lê JSON do drone e gera CSVs padronizados para o Image Uploader",
+        inputs: [
+          { inputId: "json_file", label: "Arquivo JSON", placeholder: "Clique para selecionar o arquivo JSON do Drone", type: "file", fileType: "json",
+            hint: "Arquivo photo_data.json gerado pelo app do drone no SD Card" },
+        ],
+        options: [],
+        action: "Processar JSON",
+      },
+      3: {
+        title: "3. Organizar Fotos pelo JSON",
+        desc: "Cria as pastas A/B/C e move as fotos brutas para o lugar exato baseado no mapa do JSON do Drone",
+        inputs: [
+          { inputId: "json_file",  label: "Arquivo JSON",   placeholder: "Clique para selecionar o arquivo JSON", type: "file", fileType: "json",
+            hint: "Arquivo photo_data.json da inspeção (gerado pelo app do drone)" },
+          { inputId: "photos_dir", label: "Pasta de Fotos", placeholder: "Clique para selecionar a pasta D:\\DCIM com as fotos", type: "folder",
+            hint: "Pasta onde estão os JPGs brutos (normalmente D:\\DCIM\\ do SD Card)" },
+        ],
+        options: [],
+        action: "Organizar Fotos",
+      },
+      4: {
+        title: "4. Converter CSV (; para ,)",
+        desc: "Ajusta o separador para manter o arquivo compatível com o Excel",
+        inputs: [
+          { inputId: "csv_file", label: "Arquivo CSV", placeholder: "Clique para selecionar o CSV", type: "file", fileType: "csv",
+            hint: "CSV com problema de separador (ponto-e-vírgula no lugar de vírgula)" },
+        ],
+        options: [
+          { optionId: "gen_xlsx", label: "Gerar .xlsx", choices: ["Não", "Sim"],
+            desc: "Também gera uma cópia no formato Excel (.xlsx) além do CSV convertido" },
+        ],
+        action: "Converter CSV",
+      },
+      5: {
+        title: "5. Extrair GPS + Calcular Z",
+        desc: "Lê o EXIF das fotos brutas e gera a tabela milimétrica usando a raiz como Marco Zero",
+        inputs: [
+          { inputId: "photos_dir", label: "Pasta de Fotos", placeholder: "Clique para selecionar a pasta com as fotos", type: "folder",
+            hint: "Pasta com os JPGs da inspeção que possuem dados GPS no EXIF" },
+        ],
+        options: [],
+        action: "Extrair GPS",
+      },
+      6: {
+        title: "6. Separar Pás (Blade Split)",
+        desc: "Procura quebras de tempo longas (ex: drone pousou/trocou bateria) e permite realocar a metade para um NOVO Serial Number.",
+        inputs: [
+          { inputId: "data_file", label: "Arquivo de Origem", placeholder: "Selecione o photo_data.json ou o relatorio.csv", type: "file", fileType: "all",
+            hint: "Arquivo photo_data.json ou relatorio.csv da turbina a ser dividida" },
+        ],
+        options: [],
+        action: "Aplicar Correções",
+      },
+      7: {
+        title: "7. Corrigir Z (Location) Zerado",
+        desc: "Lê um CSV da plataforma com erros esporádicos de Location=0 e recalcula apenas as fotos afetadas usando o GPS",
+        inputs: [
+          { inputId: "csv_file",   label: "Arquivo CSV (Plataforma)", placeholder: "Selecione seu CSV da turbina", type: "file", fileType: "csv",
+            hint: "CSV da plataforma com campos Location zerados (valor = 0)" },
+          { inputId: "photos_dir", label: "Pasta das Fotos Originais", placeholder: "Selecione a pasta onde os JPGs de voo estão", type: "folder",
+            hint: "Pasta onde estão os JPGs originais do voo correspondente" },
+        ],
+        options: [],
+        action: "Corrigir Z=0"
+      },
+      8: {
+        title: "8. Recuperar Fotos Perdidas",
+        desc: "Escaneia o SD Card atrás de pulos de numeração sequencial no voo. Reconstrói os dados perdidos usando as fotos limítrofes como âncora via GPS real",
+        inputs: [
+          { inputId: "json_file",  label: "JSON do Voo",            placeholder: "Selecione o photo_data.json da turbina", type: "file", fileType: "json",
+            hint: "Arquivo photo_data.json da turbina com fotos faltando" },
+          { inputId: "photos_dir", label: "Diretório Geral de Fotos", placeholder: "Onde as fotos no SD Card estão", type: "folder",
+            hint: "Pasta raiz do SD Card com todos os JPGs originais" },
+        ],
+        options: [],
+        action: "Caçar Fotos Perdidas"
+      },
+      9: {
+        title: "9. Documentação Passo a Passo",
+        desc: "Guias interativos de como operar cada módulo da ferramenta sem erros.",
+        inputs: [], options: [], action: null, doc: true,
+      },
+      10: {
+        title: "10. JSON → CSV (Organizar Imagens)",
+        desc: "Lê o JSON do drone e gera um CSV pronto para ser usado no Módulo 1, pulando o Image Uploader",
+        inputs: [
+          { inputId: "json_file", label: "Arquivo JSON", placeholder: "Clique para selecionar o arquivo JSON do Drone", type: "file", fileType: "json",
+            hint: "Arquivo photo_data.json gerado pelo app do drone" },
+        ],
+        options: [],
+        action: "Gerar CSV S&R",
+      },
+      11: {
+        title: "11. Reconstruir CSV por GPS",
+        desc: "Reconstrói o CSV do Módulo 1 direto da pasta de fotos, suportando até três pás simultaneamente. Define os lados manualmente quando o JSON está corrompido ou indisponível.",
+        inputs: [],
+        options: [],
+        action: null,
+      },
+      12: {
+        title: "12. Arthnex — Gerar CSV de Upload",
+        desc: "Gera o CSV no formato da plataforma para inspeções internas. Selecione a pasta de uma pá (com subpastas LE/TE/CE/BOX/VISUAL) ou a pasta do aerogerador (com múltiplas pás dentro — gera 1 CSV por pá automaticamente). Turbine e Blade SN são detectados pelo nome dos arquivos.",
+        inputs: [
+          { inputId: "blade_dir", label: "Pasta", placeholder: "Pasta da pá (com subpastas de região) ou do aerogerador (com pastas de pás)", type: "folder",
+            hint: "Pasta da pá com subpastas LE/TE/CE/BOX/VISUAL, ou pasta do aerogerador com várias pás" },
+        ],
+        options: [],
+        action: "Gerar CSV",
+      },
+      13: {
+        title: "13. Arthnex — Organizar Fotos pelo Nome",
+        desc: "Lê o padrão {parque}--{blade}--{região}_{location}_... do nome do arquivo e renomeia para o formato da plataforma: {blade}_{location}_{ordem}.jpg",
+        inputs: [
+          { inputId: "photos_dir", label: "Pasta de Fotos", placeholder: "Clique para selecionar a pasta com as fotos Arthbot", type: "folder",
+            hint: "Pasta com fotos GoPro no padrão {parque}--{pá}--{região}_{loc}_..." },
+        ],
+        options: [
+          { optionId: "dry_run", label: "Dry-run", choices: ["Não", "Sim"],
+            desc: "Simula a execução sem renomear nenhum arquivo — recomendado na primeira vez" },
+        ],
+        action: "Organizar Fotos",
+      },
+      14: {
+        title: "14. Recuperar da Plataforma (Arthnex)",
+        desc: "Cruza fotos renomeadas pela plataforma com o CSV original, recriando as fotos originais prontas para o Módulo 1.",
+        inputs: [
+          { inputId: "csv_file",   label: "Arquivo CSV (Original/Misturado)", placeholder: "Clique para selecionar o CSV", type: "file", fileType: "csv",
+            hint: "CSV original ou combinado com os metadados das fotos da turbina" },
+          { inputId: "photos_dir", label: "Diretório Arthnex Export", placeholder: "Clique para selecionar a pasta com fotos Arthnex", type: "folder",
+            hint: "Pasta exportada do Arthnex contendo as fotos já renomeadas pela plataforma" },
+        ],
+        options: [],
+        action: "Criar Vínculo",
+      },
+      15: {
+        title: "15. Calibrar Z GoPro RAW",
+        desc: "Avança o Z em 500mm por posição. Suporta fotos pareadas (0° e 45°) até um limite. Gera as fotos renomeadas no padrão Arthnex prontas para upload.",
+        inputs: [
+          { inputId: "blade_dir", label: "Pasta da Pá", placeholder: "Pasta com subpastas de região (LE/TE/CE/BOX/VISUAL)", type: "folder",
+            hint: "Pasta da pá com subpastas de região (LE, TE, CE, BOX, VISUAL)" },
+        ],
+        options: [
+          { optionId: "turbine",  type: "text", label: "Turbine",  placeholder: "ex: WTG-95" },
+          { optionId: "blade_sn", type: "text", label: "Blade SN", placeholder: "ex: 29106458WHBK..." },
+        ],
+        action: "Calibrar e Renomear",
+      },
+      16: {
+        title: "16. Horizon Processor",
+        desc: "Valida nomenclatura, verifica requisitos e gera o pacote ZIP para submissão na plataforma Horizon.",
+        inputs: [],
+        options: [],
+        action: null,
+      },
+      17: {
+        title: "17. Análise de Workflow",
+        desc: "Audita a planilha do Smartsheet, cruza campanhas e acha escapes/recoletas de inspeção de pás.",
+        inputs: [],
+        options: [],
+        action: null,
+      },
+      18: {
+        title: "Processar Vídeo 360° (Arthbot)",
+        desc: "Calibração Z do odômetro e renderização de vídeo 360° equiretangular com telemetria e corte.",
+        inputs: [],
+        options: [],
+        action: null,
+      },
+      19: {
+        title: "19. Arthnex Uploader",
+        desc: "Sobe fotos pro Arthnex via CSV + URLs pré-assinadas (mesma API do Image Uploader oficial), corrigindo o nome enviado ao servidor quando o caminho da foto tem subpastas (caso comum do Arthdrone).",
+        inputs: [],
+        options: [],
+        action: null,
+      },
+    },
+    log_title: "Log de Execução",
+    log_placeholder: "A saída da ferramenta aparecerá aqui.",
+    clear: "Limpar",
+    copy_log: "Copiar",
+    copied: "Copiado!",
+    select_root: "Selecione a foto raiz (Z=0)",
+    root_selected: "Raiz selecionada",
+    load_photos: "Carregar fotos",
+    loading: "Lendo...",
+    processing: "Processando...",
+    done: "Concluído!",
+    done_hint: "O resultado foi salvo na pasta de saída. Verifique o log abaixo para detalhes.",
+    done_error_hint: "Ocorreu um erro durante a execução. Verifique o log abaixo para mais detalhes.",
+    run_again: "Executar novamente",
+    open_output: "Abrir pasta gerada",
+    ready: "Pronto",
+    analyze_json: "Analisar Gaps",
+  },
+  en: {
+    title: "ARTHWIND SUITE", subtitle: "Multiplatform Data Automation Tool",
+    modules: [
+      { id: 1,  label: "Organize Images",  icon: "organize", short: "S&R from CSV",      group: "S&R Flow" },
+      { id: 10, label: "JSON → CSV S&R",  icon: "json",     short: "JSON to S&R CSV",   group: "S&R Flow" },
+      { id: 2,  label: "Process JSON",    icon: "json",     short: "JSON to CSVs",      group: "S&R Flow" },
+      { id: 3,  label: "Organize Photos", icon: "photos",   short: "Photos via JSON",   group: "S&R Flow" },
+      { id: 11, label: "Rebuild CSV",      icon: "organize", short: "Recover from GPS", group: "Fixes" },
+      { id: 4, label: "Convert CSV",      icon: "csv",      short: "CSV to Excel", group: "Tools" },
+      { id: 5, label: "GPS + Relative Z", icon: "gps",      short: "Relative altitude", group: "Tools" },
+      { id: 6, label: "Blade Split",       icon: "split",    short: "Split mixed blades", group: "Fixes" },
+      { id: 7, label: "Fix Z=0 CSV",      icon: "gps",      short: "Fix Location", group: "Fixes" },
+      { id: 8, label: "Recover Lost Photos", icon: "photos", short: "Find SD missings", group: "Fixes" },
+      { id: 9, label: "Documentation",    icon: "docs",     short: "User manual", group: "Support" },
+      { id: 12, label: "Arthnex Packer",    icon: "packer",   short: "Internal upload CSV",  group: "Arthbot" },
+      { id: 19, label: "Arthnex Uploader",    icon: "upload",   short: "API upload (fixed)",  group: "Arthbot" },
+      { id: 13, label: "GoPro to Arthnex",  icon: "organize", short: "Rename from filename", group: "Arthbot" },
+      { id: 14, label: "Link Arthnex/CSV",     icon: "organize", short: "Match photos/metadata",  group: "Platform" },
+      { id: 15, label: "Calibrate GoPro RAW Z", icon: "gps",      short: "Fixed 500mm step",      group: "Arthbot"  },
+      { id: 16, label: "Horizon Processor",      icon: "file",     short: "Horizon packaging",    group: "Horizon"  },
+    ],
+    fields: {
+      1: {
+        title: "1. Organize S&R Images",
+        desc: "Reads the platform CSV and organizes photos into OUTPUT/Blade/Region",
+        inputs: [
+          { inputId: "csv_file",   label: "CSV File",      placeholder: "Click to select the platform CSV file", type: "file",   fileType: "csv",
+            hint: "CSV exported from the platform Image Uploader (or generated by Module 2 / 10)" },
+          { inputId: "photos_dir", label: "Photos Folder", placeholder: "Click to select the folder with photos", type: "folder",
+            hint: "Root folder with raw JPGs from the flight (e.g. D:\\DCIM\\)" },
+        ],
+        options: [
+          { optionId: "dry_run", label: "Dry-run",  choices: ["No", "Yes"],
+            desc: "Simulates the run without moving any files — recommended on first use" },
+        ],
+        action: "Organize Images",
+      },
+      2: {
+        title: "2. Process JSON",
+        desc: "Reads drone JSON and generates CSVs for Image Uploader with correct sequence",
+        inputs: [
+          { inputId: "json_file", label: "JSON File", placeholder: "Click to select the JSON file", type: "file", fileType: "json",
+            hint: "photo_data.json generated by the drone app on the SD Card" },
+        ],
+        options: [],
+        action: "Process JSON",
+      },
+      3: {
+        title: "3. Organize Photos via JSON",
+        desc: "Creates folders and copies raw photos to paths defined in JSON map",
+        inputs: [
+          { inputId: "json_file",  label: "JSON File",     placeholder: "Click to select the JSON file",          type: "file",   fileType: "json",
+            hint: "Inspection photo_data.json (from the drone app)" },
+          { inputId: "photos_dir", label: "Photos Folder", placeholder: "Click to select the folder with photos", type: "folder",
+            hint: "Folder containing raw JPGs from the SD Card (usually D:\\DCIM\\)" },
+        ],
+        options: [],
+        action: "Organize Photos",
+      },
+      4: {
+        title: "4. Convert CSV",
+        desc: "Converts semicolon-separated CSV to comma-separated, compatible with Excel",
+        inputs: [
+          { inputId: "csv_file", label: "CSV File", placeholder: "Click to select the CSV file", type: "file", fileType: "csv",
+            hint: "CSV with delimiter issue (semicolon instead of comma)" },
+        ],
+        options: [
+          { optionId: "gen_xlsx", label: "Generate .xlsx", choices: ["No", "Yes"],
+            desc: "Also generates an Excel (.xlsx) copy alongside the converted CSV" },
+        ],
+        action: "Convert CSV",
+      },
+      5: {
+        title: "5. Extract GPS + Relative Z",
+        desc: "Extracts GPS altitude from photos and calculates relative progression in mm",
+        inputs: [
+          { inputId: "photos_dir", label: "Photos Folder", placeholder: "Click to select the folder with photos", type: "folder",
+            hint: "Folder with inspection JPGs that have GPS altitude data in EXIF" },
+        ],
+        options: [],
+        action: "Extract GPS",
+      },
+      6: {
+        title: "6. Blade Split",
+        desc: "Finds time gaps and splits mixed photos onto a new Blade SN (supports JSON or CSV)",
+        inputs: [
+          { inputId: "data_file", label: "Data File", placeholder: "Select the photo_data.json or report.csv", type: "file", fileType: "all",
+            hint: "photo_data.json or relatorio.csv from the turbine to be split" },
+        ],
+        options: [],
+        action: "Apply Corrections",
+      },
+      7: {
+        title: "7. Fix Z (Location) = 0",
+        desc: "Reads a platform CSV with Location=0 errors and recalculates progression in mm targeting only bad rows",
+        inputs: [
+          { inputId: "csv_file",   label: "CSV File (Platform)", placeholder: "Click to select CSV file", type: "file", fileType: "csv",
+            hint: "Platform CSV with Location fields set to zero (= 0)" },
+          { inputId: "photos_dir", label: "Photos Folder", placeholder: "Click to select folder with original photos", type: "folder",
+            hint: "Folder containing the original flight JPGs" },
+        ],
+        options: [],
+        action: "Fix Z"
+      },
+      8: {
+        title: "8. Recover Missing Photos",
+        desc: "Scans the SD Card for sequential numeric leaps. Reconstructs missing JSON outputs using precise GPS boundaries.",
+        inputs: [
+          { inputId: "json_file",  label: "JSON File",             placeholder: "Select the turbine photo_data.json", type: "file", fileType: "json",
+            hint: "photo_data.json from the turbine with missing photos" },
+          { inputId: "photos_dir", label: "SD Card Photos Folder", placeholder: "Root folder of raw images", type: "folder",
+            hint: "SD Card root folder containing all original JPGs" },
+        ],
+        options: [],
+        action: "Hunt Lost Photos"
+      },
+      9: {
+        title: "9. Step-by-step Documentation",
+        desc: "Complete and interactive tool manual",
+        inputs: [], options: [], action: null, doc: true,
+      },
+      10: {
+        title: "10. JSON → CSV (Organize Images)",
+        desc: "Reads the drone JSON and generates a CSV ready to use in Module 1, skipping the Image Uploader",
+        inputs: [
+          { inputId: "json_file", label: "JSON File", placeholder: "Click to select the drone JSON file", type: "file", fileType: "json",
+            hint: "photo_data.json generated by the drone app" },
+        ],
+        options: [],
+        action: "Generate S&R CSV",
+      },
+      11: {
+        title: "11. Rebuild CSV from GPS",
+        desc: "Reconstructs the Module 1 CSV directly from the photos folder, supporting up to three blades simultaneously. Define sides manually when JSON is corrupted or unavailable.",
+        inputs: [],
+        options: [],
+        action: null,
+      },
+      12: {
+        title: "12. Arthnex — Generate Upload CSV",
+        desc: "Generates the platform-format CSV for internal inspections. Select a blade folder (with LE/TE/CE/BOX/VISUAL subfolders) or the turbine folder (with multiple blades inside — generates 1 CSV per blade automatically). Turbine and Blade SN are detected from filenames.",
+        inputs: [
+          { inputId: "blade_dir", label: "Folder", placeholder: "Blade folder (with region subfolders) or turbine folder (with blade folders)", type: "folder",
+            hint: "Blade folder with LE/TE/CE/BOX/VISUAL subfolders, or turbine folder with multiple blades" },
+        ],
+        options: [],
+        action: "Generate CSV",
+      },
+      13: {
+        title: "13. Arthnex — Organize Photos by Name",
+        desc: "Reads {park}--{blade}--{region}_{location}_... pattern from the filename and renames to platform format: {blade}_{location}_{order}.jpg",
+        inputs: [
+          { inputId: "photos_dir", label: "Photos Folder", placeholder: "Click to select the folder with Arthbot photos", type: "folder",
+            hint: "GoPro photos in format {park}--{blade}--{region}_{loc}_..." },
+        ],
+        options: [
+          { optionId: "dry_run", label: "Dry-run", choices: ["No", "Yes"],
+            desc: "Simulates the run without renaming any files — recommended on first use" },
+        ],
+        action: "Organize Photos",
+      },
+      14: {
+        title: "14. Recover from Platform (Arthnex)",
+        desc: "Links photos renamed by the platform back with the original CSV, recreating DJI ready files for Module 1.",
+        inputs: [
+          { inputId: "csv_file",   label: "Original/Mixed CSV File", placeholder: "Click to select CSV file", type: "file", fileType: "csv",
+            hint: "Original or combined CSV with photo metadata" },
+          { inputId: "photos_dir", label: "Arthnex Export Folder", placeholder: "Click to select Arthnex photos folder", type: "folder",
+            hint: "Arthnex export folder containing the platform-renamed photos" },
+        ],
+        options: [],
+        action: "Create Link",
+      },
+      15: {
+        title: "15. Calibrate GoPro RAW Z",
+        desc: "Advances Z by 500mm per position. Supports paired photos (0° and 45°) up to a limit. Outputs renamed files in Arthnex format ready for upload.",
+        inputs: [
+          { inputId: "blade_dir", label: "Blade Folder", placeholder: "Folder with region subfolders (LE/TE/CE/BOX/VISUAL)", type: "folder",
+            hint: "Blade folder with region subfolders (LE, TE, CE, BOX, VISUAL)" },
+        ],
+        options: [
+          { optionId: "turbine",  type: "text", label: "Turbine",  placeholder: "e.g. WTG-95" },
+          { optionId: "blade_sn", type: "text", label: "Blade SN", placeholder: "e.g. 29106458WHBK..." },
+        ],
+        action: "Calibrate and Rename",
+      },
+      16: {
+        title: "16. Horizon Processor",
+        desc: "Validates nomenclature, checks requirements and generates the ZIP package for submission on the Horizon platform.",
+        inputs: [],
+        options: [],
+        action: null,
+      },
+      19: {
+        title: "19. Arthnex Uploader",
+        desc: "Uploads photos to Arthnex via CSV + presigned URLs (same API as the official Image Uploader), fixing the name sent to the server when the photo path has subfolders (common for Arthdrone).",
+        inputs: [],
+        options: [],
+        action: null,
+      },
+    },
+    log_title: "Execution Log",
+    log_placeholder: "Process output will appear here after running.",
+    clear: "Clear",
+    copy_log: "Copy",
+    copied: "Copied!",
+    select_root: "Select root photo (Z=0)",
+    root_selected: "Root selected",
+    load_photos: "Load photos",
+    loading: "Reading...",
+    processing: "Processing...",
+    done: "Done!",
+    done_hint: "Result saved to the output folder. Check the log below for details.",
+    done_error_hint: "An error occurred during execution. Check the log below for more details.",
+    run_again: "Run again",
+    open_output: "Open output folder",
+    ready: "Ready",
+    analyze_json: "Analyze Gaps",
+  },
+};
+
+export const GROUP_COLORS = {
+  "Arthdrone": "#2e5aa0",
+  "Arthbot":   "#7c3aed",
+  "Ferramentas": "#059669",
+  "Plataforma do Cliente": "#c97d1e",
+  "Suporte": "#64748b",
+  "S&R Flow": "#2e5aa0",
+  "Fixes":    "#e55b2d",
+  "Tools":    "#059669",
+  "Platform": "#c97d1e",
+  "Horizon":  "#c97d1e",
+  "Support":  "#64748b",
+};
+
+export const docContent = {
+  pt: [
+    { 
+      title: "Módulo 1: Organizar Imagens S&R", 
+      body: "Este é o módulo principal para padronizar as imagens baixadas do voo com o CSV da plataforma. \n\n**Passo a passo:**\n1. Selecione o CSV principal da turbina (Exportado da plataforma).\n2. Selecione a pasta inteira onde os JPGs do voo do drone estão salvos.\n3. Defina o 'Modo': \n- Plataform vai renomear as fotos e injetar todos metadados (para Subir pro Cliente).\n- Recovery vai manter os nomes originais DJIs mas vai criar a árvore de pastas.\n4. Ao clicar em Executar, as imagens serão copiadas ordenadamente para uma nova pasta `OUTPUT` ao lado do seu arquivo CSV." 
+    },
+    { 
+      title: "Módulo 2: Processar JSON", 
+      body: "Usado quando o voo foi feito com o App próprio e gerou o arquivo `photo_data.json` no SD Card.\n\n**Passo a passo:**\n1. Apontar para o arquivo JSON direto do drone.\n2. O processo fará a conversão massiva do mapa do JSON para relatórios no formato padrão para Upload.\n3. Automaticamente, ele descobre as subpastas e ordena o fluxo tip-to-root dependendo do Face Side da pá.\n4. Gera múltiplos CSVs na mesma pasta do JSON." 
+    },
+    { 
+      title: "Módulo 3: Organizar Fotos pelo JSON", 
+      body: "Faz o par visual do módulo anterior: Move os amontoados de imagens para suas respectivas pastas 'A, B e C'.\n\n**Passo a passo:**\n1. Selecione o `photo_data.json` da inspeção.\n2. Insira o caminho-mãe das pastas de foto.\n3. Sem alterar a extensão da imagem, a ferramenta cria as subdivisões baseadas no que está documentado no JSON, de forma higienizada." 
+    },
+    { 
+      title: "Módulo 4: Converter CSV", 
+      body: "Lida com o dilema da interpretação de CSV pelo Windows Regional (Ponto e Vírgula vs Vírgula).\n\n**Passo a passo:**\n1. Envie o CSV que está dando erro de tabulação no seu Excel / LibreOffice.\n2. Ative a caixa se quiser gerar uma cópia em formato XLS (Planilha Excel).\n3. O clique converte e re-salva rapidamente o formato para não atrapalhar sua leitura de dados nativa." 
+    },
+    { 
+      title: "Módulo 5: GPS + Calcular Z", 
+      body: "Uma ajuda milimétrica avulsa para encontrar a Progressão Relativa.\n\n**Passo a passo:**\n1. Leia a pasta da inspeção.\n2. A lista irá popular.\n3. Você precisa clicar NA FOTO QUE REPRESENTA A RAIZ (Base Z=0). \n4. O software baterá todas as outras altitudes extraídas e fornecerá uma planilha onde cada foto possui sua elevação progressiva perfeita em milímetros (independentemente do mar)." 
+    },
+    { 
+      title: "Módulo 6: Corrigir Blade Split", 
+      body: "Ocasionalmente, o drone não desliga a gravação e coloca fotos de DUAS PÁS sob o mesmo ID no CSV ou JSON.\n\n**Passo a passo:**\n1. Injete o CSV ou JSON corrompido.\n2. A tecnologia tentará ler os timestamps para avaliar um pulo maior que 60 segundos.\n3. O painel listará a divisão encontrada. \n4. Digite qual a nova letra e nome e Clique para aplicar as correções dividindo na raiz matemática do erro para dois CSVs separados!"
+    },
+    { 
+      title: "Módulo 7: Corrigir Z (Location) Zerado", 
+      body: "Ferramenta cirúrgica para CSVs oriundos da Plataforma que perderam o Rastreio de Localização (Ficando tudo = 0).\n\n**Passo a passo:**\n1. Carreque o CSV comprometido e a pasta inteira das Fotos.\n2. Acione 'Carregar Fotos'.\n3. Selecione no Tracker a Foto da Base do Root (Geralmente a primeira Foto do L.E. da respectiva pá).\n4. O back-end mapeia os campos Z=0, recalcula usando exclusivamente as altitudes GPS destas imagens prejudicadas e regrava o Output com as informações restauradas."
+    },
+    {
+      title: "Módulo 8: Recuperar Fotos Perdidas",
+      body: "Rastreia e recupera fotos perdidas por falha de tempo ou gravação falha do drone antes do processamento final.\n\n**Passo a passo:**\n1. Selecione o `photo_data.json` da sua turbina.\n2. Selecione o diretório principal bruto do SD Card onde constam as originais (.JPG).\n3. O App escaneia o sequencial da pasta atual, nota os números perdidos, acha o fantasma no SD Card e repopula um diretório de `Fotos_Recuperadas` injetando Altitude Geográfica do próprio EXIF!"
+    },
+    {
+      title: "Módulo 10: JSON → CSV S&R",
+      body: "Gera o CSV do Módulo 1 diretamente do JSON do drone, sem precisar passar pelo Image Uploader da plataforma.\n\n**Passo a passo:**\n1. Selecione o `photo_data.json` gerado pelo app do drone no SD Card.\n2. A ferramenta lê o mapa completo do JSON e converte para o formato de CSV aceito pelo Módulo 1.\n3. O CSV gerado é salvo na mesma pasta do JSON, pronto para ser usado diretamente na organização de imagens.\n\n**Quando usar:** Quando as fotos ainda não foram enviadas para a plataforma mas você já quer montar o CSV de organização com antecedência."
+    },
+    {
+      title: "Módulo 11: Reconstruir CSV por GPS",
+      body: "Reconstrói o CSV do Módulo 1 diretamente da pasta de fotos quando o JSON está corrompido, perdido ou indisponível.\n\n**Passo a passo:**\n1. Selecione a pasta com as fotos da pá.\n2. No seletor de lados, informe o Blade SN e adicione cada lado (LE, TE, SS, PS) marcando a foto de início e a foto de fim de cada um.\n3. Informe o pixel MM médio por lado — o sistema gerará valores variando ±0.015 automaticamente em torno desse valor.\n4. Clique em Reconstruir CSV. O arquivo é salvo na pasta de fotos com todos os campos necessários para upload na plataforma.\n\n**Atenção:** SS e PS têm a ordem invertida automaticamente (voo tip→root é revertido para root→tip, padrão da plataforma)."
+    },
+    {
+      title: "Módulo 12: Arthnex Packer — Gerar CSV de Upload",
+      body: "Gera o CSV no formato da plataforma para inspeções internas, sem exigir uma estrutura de pastas específica. O valor de `distance_to_hub` é extraído automaticamente do `location` no nome do arquivo.\n\n**Passo a passo:**\n1. Selecione a pasta da pá (pode conter subpastas LE, TE, CE, BOX, VISUAL ou fotos soltas).\n2. Preencha Work Order, Turbina e Blade SN.\n3. Clique em Gerar CSV.\n\n**Detecção de região e location:**\n- Prioridade 1: padrão no nome do arquivo `...--REGIÃO_LOCATION_...` (ex: `...--LE_1000_...`)\n- Prioridade 2: nome da pasta pai (ex: pasta `LE/`) + `_LOCATION_` no nome do arquivo\n- Arquivos sem região detectável são ignorados com aviso.\n\n**Mapeamento para a plataforma:** BOX → TE, VISUAL → CE (comportamento legado).\n\nO CSV é salvo na própria pasta da pá como `{workorder}--{turbina}--{blade}.csv`."
+    },
+    {
+      title: "Módulo 13: GoPro para Arthnex — Organizar Fotos pelo Nome",
+      body: "Renomeia e organiza fotos de inspeção interna (GoPro/Arthbot) para o formato da plataforma Arthnex, usando o próprio nome do arquivo como fonte de metadados.\n\n**Passo a passo:**\n1. Selecione a pasta com as fotos.\n2. Ative Dry-run para pré-visualizar sem copiar (recomendado na primeira vez).\n3. Clique em Organizar Fotos.\n\n**Padrão de nome reconhecido:** `{parque}--{blade_sn}--{REGIÃO}_{location}_{...}.jpg`\nEx: `SA4WTG3--29290344WH569G00790--LE_1000_GOPR4532.jpg`\n\n**Output:** `OUTPUT/{blade_sn}/{REGIÃO}/{blade_sn}_{location}_{ordem}.jpg`\n\nNão usa pixel_mm (campo não aplicável a inspeções internas Arthbot). Dentro de cada região as fotos são ordenadas por location antes de atribuir o número de ordem."
+    },
+    {
+      title: "Módulo 14: Recuperar da Plataforma (Arthnex)",
+      body: "Ideal quando o piloto não retém o backup DJI e você precisa juntar as fotos (já exportadas da plataforma) com o CSV dos metadados originais.\n\n**Passo a passo:**\n1. Forneça o CSV de relatório (mesmo que haja mistura de pás ou desordem, utilizaremos os IDs das linhas e milímetros de Location).\n2. Aponte o diretório principal das fotos exportadas.\n3. O App usará matemática relacional via `Ordens, Lados e Locations` já inseridas no Rename da plataforma e fará um cross-link renomeando a foto para virar a foto nativa do seu CSV, criando uma nova subpasta `OUTPUT_ARTHNEX_MATCH` ao redor do CSV."
+    },
+    {
+      title: "Módulo 15: Calibrar Z GoPro RAW",
+      body: "Avança o Z em 500mm por posição na inspeção interna GoPro. Suporta fotos pareadas (0° e 45°) e possui detecção automática de limite/rollover da câmera (9999 → 0001).\n\n**Passo a passo:**\n1. Selecione a pasta com subpastas de região (LE/TE/CE/BOX/VISUAL).\n2. Insira a Turbina e o Blade SN.\n3. O sistema gerará as fotos renomeadas no padrão Arthnex prontas para upload, mantendo a documentação sequencial perfeita."
+    },
+    {
+      title: "Módulo 16: Horizon Processor",
+      body: "Primeiro módulo voltado para plataformas de terceiros, marcando a transição do Arthwind Suite para um hub multiplataforma. Valida a nomenclatura e empacota os dados perfeitamente para a plataforma Horizon (usada em clientes como a General Electric).\n\n**Passo a passo:**\n1. Forneça o arquivo Base Horizon e os Summary ATW.\n2. Adicione os Details e Damages CSV.\n3. O sistema cruzará os dados, identificará automaticamente turbinas não documentadas, extras ou conflitantes, além de realizar verificações de segurança como Datas e Formatos.\n4. Ao final, gera um Pacote ZIP unificado contendo os metadados finais limpos (Summary, Details, Damages) pronto para o upload na plataforma do cliente.\n\n*(Nota: No futuro, módulos equivalentes para plataformas como Siemens Gamesa serão incorporados seguindo essa mesma arquitetura.)*"
+    },
+    {
+      title: "Módulo 17: Análise de Workflow (Auditor Smartsheet)",
+      body: "Audita a planilha do Smartsheet cruzando-a com dados de e-mails de coletas diárias para encontrar divergências, revoos ou escapes de aerogeradores.\n\n**Passo a passo:**\n1. Escolha a Origem do Smartsheet: API (Internas ou Externas) ou Local (selecionando um arquivo .xlsx manualmente).\n2. Opcional (Auditoria de E-mail): Ative a opção e escolha entre ler e-mails via conexão IMAP direta (Gmail) ou fornecendo um arquivo de e-mail exportado (.eml) ou texto copiado da coleta diária.\n3. Defina as datas de início e fim da inspeção (opcional) e carregue o arquivo de inspeções da coletora (se houver).\n4. Clique em **Analisar Workflow** para gerar o painel com as campanhas identificadas, divergências encontradas, taxa de conformidade e o cruzamento detalhado.\n5. Clique em **Exportar SR Pendente** para gerar e abrir uma planilha Excel separada apenas com os aerogeradores do Smartsheet que possuem Status 'Vermelho', contendo as colunas essenciais: WO, Parque, Cliente, Turbina, Piloto e Data da Coleta."
+    },
+    {
+      title: "Módulo 18: Processar Vídeo 360° (Arthbot)",
+      body: "Calibra, corta e renderiza o vídeo 360° equiretangular do Arthbot, gravando a telemetria de Z como marca d'água diretamente no arquivo de saída.\n\n**Passo a passo:**\n1. No painel lateral direito, selecione o arquivo de vídeo 360° (.mp4), o CSV de telemetria gerado pelo Arthbot e a pasta de destino do output.\n2. Reproduza o vídeo e use os controles de playback para navegar (Espaço = play/pause, ← → = quadro a quadro, Shift+← → = ±5s).\n3. **Calibração Z (Fix Z):** Se o odômetro do Arthbot não bater com o projeto, pause o vídeo em 3 marcos conhecidos, clique em 'Get' para capturar o Z da câmera e preencha o Z real do projeto ao lado. O algoritmo de interpolação linear por partes (Piecewise) corrigirá automaticamente todos os valores intermediários.\n4. **Corte:** Defina Z Início e Z Fim (em mm) para delimitar a região de inspeção relevante. A Margem de Segurança estende o corte alguns milímetros além dos limites para garantir que nenhuma parte da pá seja cortada.\n5. **Marca d'água:** Clique em 'Selecionar Posição da Marca' para abrir o posicionador. No modo plano, clique diretamente sobre a luz do Arthbot — a posição clicada é exatamente a coluna gravada no vídeo. No modo 3D, navegue arrastando a esfera e clique em 'Marcar aqui' para fixar o ponto central.\n6. Ajuste a velocidade de reprodução e ative 'Inverter reprodução' se o vídeo foi gravado da ponta para a raiz.\n7. Clique em **Renderizar Vídeo Cortado** — o FFmpeg processa em background e exibe o progresso em tempo real.\n\n**Painel de perspectivas:** As 4 miniaturas à esquerda (0° Frente, 90° Direita, 180° Trás, 270° Esquerda) são recortes rectilineares renderizados ao vivo pela cena 3D — clique em uma miniatura para o player principal girar para aquela direção."
+    }
+  ],
+  en: [
+    {
+      title: "Module 1: Organize S&R Images",
+      body: "Main module to standardize downloaded flight images against the platform CSV.\n\n**Step by step:**\n1. Select the main turbine CSV (exported from the platform).\n2. Select the entire folder where the drone flight JPGs are saved.\n3. Set the mode:\n- Platform: renames photos and injects all metadata (for client upload).\n- Recovery: keeps original DJI filenames but builds the folder tree.\n4. Click Execute — images are copied in order to a new `OUTPUT` folder next to your CSV file."
+    },
+    {
+      title: "Module 2: Process JSON",
+      body: "Used when the flight was done with the proprietary app and generated `photo_data.json` on the SD Card.\n\n**Step by step:**\n1. Point to the drone's `photo_data.json` file.\n2. The tool converts the full JSON map into platform-ready upload reports.\n3. Automatically detects subfolders and sorts the flow tip-to-root based on the blade's Face Side.\n4. Generates multiple CSVs in the same folder as the JSON."
+    },
+    {
+      title: "Module 3: Organize Photos via JSON",
+      body: "Visual counterpart of Module 2: moves raw photo dumps into their proper A, B, C blade folders.\n\n**Step by step:**\n1. Select the inspection's `photo_data.json`.\n2. Set the parent path of the photos folder.\n3. The tool creates subdivisions based on what is documented in the JSON without altering image extensions or filenames."
+    },
+    {
+      title: "Module 4: Convert CSV",
+      body: "Handles CSV interpretation issues caused by Windows regional settings (semicolon vs. comma).\n\n**Step by step:**\n1. Submit the CSV that is showing tab errors in Excel or LibreOffice.\n2. Enable the checkbox if you want a copy in XLS (Excel Spreadsheet) format.\n3. Click to convert and re-save the file so your native data reading is not disrupted."
+    },
+    {
+      title: "Module 5: GPS + Relative Z",
+      body: "A standalone millimetric aid for finding Relative Progression.\n\n**Step by step:**\n1. Load the inspection folder.\n2. The photo list will populate.\n3. Click on the photo that represents the Root (Base Z=0).\n4. The software cross-references all extracted altitudes and outputs a spreadsheet where each photo has its exact progressive elevation in millimeters, independent of sea level."
+    },
+    {
+      title: "Module 6: Blade Split",
+      body: "Occasionally the drone does not stop recording and places photos from two blades under the same ID in the CSV or JSON.\n\n**Step by step:**\n1. Load the corrupted CSV or JSON.\n2. The tool reads timestamps to detect gaps longer than 60 seconds.\n3. The panel lists the split point found.\n4. Enter the new blade letter and name, then click to apply — the tool splits at the mathematical root of the error into two separate CSVs."
+    },
+    {
+      title: "Module 7: Fix Z (Location) = 0",
+      body: "Surgical tool for platform CSVs where Location tracking broke (all values = 0).\n\n**Step by step:**\n1. Load the compromised CSV and the full photos folder.\n2. Click 'Load Photos'.\n3. Select the Root photo in the tracker (usually the first L.E. photo of the respective blade).\n4. The backend maps all Z=0 fields, recalculates using exclusively the GPS altitudes of the affected images, and saves the Output with restored data."
+    },
+    {
+      title: "Module 8: Recover Lost Photos",
+      body: "Tracks and recovers photos lost due to timing failure or faulty drone recording before final processing.\n\n**Step by step:**\n1. Select the turbine's `photo_data.json`.\n2. Select the raw SD Card root directory containing the originals (.JPG).\n3. The app scans the folder sequence, identifies missing numbers, locates the ghost files on the SD Card, and repopulates a `Recovered_Photos` directory injecting geographic altitude from the EXIF data."
+    },
+    {
+      title: "Module 10: JSON → CSV S&R",
+      body: "Generates the Module 1 CSV directly from the drone JSON, bypassing the platform's Image Uploader.\n\n**Step by step:**\n1. Select the `photo_data.json` generated by the drone app on the SD Card.\n2. The tool reads the full JSON map and converts it to the CSV format accepted by Module 1.\n3. The generated CSV is saved in the same folder as the JSON, ready to use directly in image organization.\n\n**When to use:** When photos have not yet been uploaded to the platform but you want to prepare the organization CSV in advance."
+    },
+    {
+      title: "Module 11: Rebuild CSV from GPS",
+      body: "Reconstructs the Module 1 CSV directly from the photos folder when the JSON is corrupted, lost, or unavailable.\n\n**Step by step:**\n1. Select the folder containing the blade photos.\n2. In the sides selector, enter the Blade SN and add each side (LE, TE, SS, PS) by marking the start and end photo for each one.\n3. Enter the average pixel MM per side — the system generates values varying by ±0.015 automatically around that value.\n4. Click Rebuild CSV. The file is saved in the photos folder with all fields required for platform upload.\n\n**Note:** SS and PS sides are automatically reversed (tip→root flight order is flipped to root→tip, as required by the platform)."
+    },
+    {
+      title: "Module 12: Arthnex Packer — Generate Upload CSV",
+      body: "Generates the platform-format CSV for internal inspections, without requiring a specific folder structure. The `distance_to_hub` value is automatically extracted from the `location` in the filename.\n\n**Step by step:**\n1. Select the blade folder (may contain LE, TE, CE, BOX, VISUAL subfolders or loose photos).\n2. Fill in Work Order, Turbine and Blade SN.\n3. Click Generate CSV.\n\n**Region & location detection:**\n- Priority 1: filename pattern `...--REGION_LOCATION_...` (e.g. `...--LE_1000_...`)\n- Priority 2: parent folder name (e.g. folder `LE/`) + `_LOCATION_` in filename\n- Files with no detectable region are skipped with a warning.\n\n**Platform mapping:** BOX → TE, VISUAL → CE (legacy behavior).\n\nThe CSV is saved in the blade folder as `{workorder}--{turbine}--{blade}.csv`."
+    },
+    {
+      title: "Module 13: GoPro to Arthnex — Organize Photos by Name",
+      body: "Renames and organizes internal inspection photos (GoPro/Arthbot) into the Arthnex platform format, using the filename itself as the metadata source.\n\n**Step by step:**\n1. Select the folder with the photos.\n2. Enable Dry-run to preview without copying (recommended on first run).\n3. Click Organize Photos.\n\n**Recognized filename pattern:** `{park}--{blade_sn}--{REGION}_{location}_{...}.jpg`\nEx: `SA4WTG3--29290344WH569G00790--LE_1000_GOPR4532.jpg`\n\n**Output:** `OUTPUT/{blade_sn}/{REGION}/{blade_sn}_{location}_{order}.jpg`\n\nNo pixel_mm (field not applicable for Arthbot internal inspections). Within each region, photos are sorted by location before assigning the order number."
+    },
+    {
+      title: "Module 14: Recover from Platform (Arthnex)",
+      body: "Ideal for scenarios where the drone pilot does not have a DJI backup and you must reassemble the exported photos alongside original metadata matrices.\n\n**Step by step:**\n1. Set your original internal data CSV (it is fine if several blades are appended into one CSV).\n2. Feed the root directory of your exported photos.\n3. Based upon the explicit data embedded in the Platform's filename tags (like Ordered Subtitles and Location Milimeters), the software parses collisions, bridges orphan tags and generates exactly the DJI files required by Module 1, allocating them on a neat output framework named `OUTPUT_ARTHNEX_MATCH`."
+    },
+    {
+      title: "Module 15: Calibrate GoPro RAW Z",
+      body: "Advances the Z dimension by 500mm per position during GoPro internal inspections. It supports paired photos (0° and 45°) and features automatic camera counter rollover detection (9999 → 0001).\n\n**Step by step:**\n1. Select the folder containing region subfolders (LE/TE/CE/BOX/VISUAL).\n2. Input the Turbine and Blade SN.\n3. The system generates renamed files following the Arthnex format, ensuring perfect sequential tracking ready for upload."
+    },
+    {
+      title: "Module 16: Horizon Processor",
+      body: "First module tailored for third-party platforms, marking the transition of Arthwind Suite into a multiplatform hub. It handles validation and packaging exclusively for the Horizon platform (used by clients such as General Electric).\n\n**Step by step:**\n1. Supply the Base Horizon file and the ATW Summary files.\n2. Upload the Details and Damages CSVs.\n3. The system cross-references the data, automatically matches turbine names, identifies extras or missing records, and runs safety checks on Formats and Dates.\n4. It generates a unified ZIP package containing cleaned metadata (Summary, Details, Damages), perfectly formatted for the client's platform upload.\n\n*(Note: In the future, equivalent packaging modules for platforms like Siemens Gamesa will be included following this same architecture.)*"
+    },
+    {
+      title: "Module 17: Workflow Analysis (Smartsheet Auditor)",
+      body: "Audits the Smartsheet spreadsheet by cross-referencing it with daily collection emails to find discrepancies, reflights, or wind turbine escapes.\n\n**Step by step:**\n1. Choose the Smartsheet Source: API (Internal or External) or Local (manually selecting a .xlsx file).\n2. Optional (Email Audit): Enable the option and choose between reading emails via direct IMAP connection (Gmail) or providing an exported email file (.eml) or text copied from the daily collection.\n3. Define the start and end dates of the inspection (optional) and load the collector's inspection file (if any).\n4. Click **Analisar Workflow** to generate the dashboard with identified campaigns, found discrepancies, compliance rate, and detailed cross-referencing.\n5. Click **Exportar SR Pendente** to generate and open a separate Excel spreadsheet listing only Smartsheet turbines with 'Vermelho' Status, containing the essential columns: WO, Parque, Cliente, Turbina, Piloto, and Data da Coleta."
+    },
+    {
+      title: "Module 18: Process 360° Video (Arthbot)",
+      body: "Calibrates, trims, and renders the Arthbot equirectangular 360° video, burning the Z telemetry as a watermark directly into the output file.\n\n**Step by step:**\n1. In the right-side panel, select the 360° video file (.mp4), the Arthbot-generated telemetry CSV, and the output destination folder.\n2. Play the video and use the playback controls to navigate (Space = play/pause, ← → = frame by frame, Shift+← → = ±5s).\n3. **Z Calibration (Fix Z):** If the Arthbot odometer does not match the engineering project values, pause the video at 3 known reference points, click 'Get' to capture the camera Z, and fill in the real project Z alongside it. The piecewise linear interpolation algorithm will automatically correct all intermediate values.\n4. **Trim:** Set Z Start and Z End (in mm) to bound the relevant inspection region. The Safety Margin extends the cut a few millimeters beyond the limits to ensure no part of the blade is accidentally clipped.\n5. **Watermark:** Click 'Selecionar Posição da Marca' to open the positioner. In flat mode, click directly on the Arthbot light — the clicked position is exactly the column burned into the video. In 3D mode, drag to navigate the sphere and click 'Marcar aqui' to lock the center crosshair.\n6. Adjust playback speed and enable 'Inverter reprodução' if the video was recorded tip-to-root.\n7. Click **Renderizar Vídeo Cortado** — FFmpeg processes in the background and shows real-time progress.\n\n**Perspective panel:** The 4 thumbnails on the left (0° Front, 90° Right, 180° Back, 270° Left) are live rectilinear crops rendered from the shared 3D scene — click any thumbnail to snap the main player to that direction."
+    }
+  ],
+};
