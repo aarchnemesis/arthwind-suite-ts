@@ -280,7 +280,10 @@ function toCsv(data: any[], delimiter = ','): string {
 
 function toDamageCsv(data: any[]): string {
   if (data.length === 0) return ''
-  const headers = Object.keys(data[0])
+  const standardHeaders = ['Notes', 'Photo File Name', 'Coordinates', 'Inspection Date', 'Date', 'Site', 'Turbine']
+  const rowHeaders = Object.keys(data[0])
+  const headers = Array.from(new Set([...standardHeaders, ...rowHeaders]))
+  
   const csvLines = [headers.join(',')]
   data.forEach(row => {
     const line = headers.map(h => {
@@ -947,6 +950,16 @@ export async function horizonGerarPacote(
 
     // 3. Damages Final
     const coveredPhotosByTurbine: Record<string, Set<string>> = {}
+    const horizonDates: Record<string, string> = {}
+    const horizonSites: Record<string, string> = {}
+    if (dfSummaryFinal) {
+      dfSummaryFinal.forEach(row => {
+        const t = String(row.Turbine || '').trim()
+        horizonDates[t] = String(row['Inspection Date'] || '').trim()
+        horizonSites[t] = String(row['Site'] || '').trim()
+      })
+    }
+
     for (const dp of damagesPaths || []) {
       if (fs.existsSync(dp)) {
         const contentDam = fs.readFileSync(dp, 'utf-8')
@@ -954,7 +967,21 @@ export async function horizonGerarPacote(
         if (dfM && dfM.length > 0 && 'Photo File Name' in dfM[0]) {
           dfM = dfM.filter(row => validPhotos.has(cleanFilename(String(row['Photo File Name'] || ''))))
           if (dfM.length > 0) {
-            zip.file(path.basename(dp), toDamageCsv(dfM))
+            const turbineFromFilename = path.basename(dp, '.csv').trim()
+            const horizonTurbineName = atwParaHor[turbineFromFilename] || turbineFromFilename
+            const dateVal = horizonDates[horizonTurbineName] || ''
+            const siteVal = horizonSites[horizonTurbineName] || ''
+
+            dfM.forEach(row => {
+              row['Turbine'] = horizonTurbineName
+              row['Site'] = siteVal
+              row['Inspection Date'] = dateVal
+              row['Date'] = dateVal
+            })
+
+            const zipFilename = `${horizonTurbineName}.csv`
+            zip.file(zipFilename, toDamageCsv(dfM))
+            
             dfM.forEach(row => {
               const p = String(row['Photo File Name'] || '').trim()
               if (p) {
