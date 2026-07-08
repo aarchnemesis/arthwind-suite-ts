@@ -46,6 +46,7 @@ import {
   listarPasPendentes,
   uploadCsv
 } from './services/uploader'
+import { substituirVideos360 } from './services/videoReplacer'
 
 // Configuration Helpers
 function getConfigPath(): string {
@@ -331,6 +332,10 @@ app.whenReady().then(() => {
   ipcMain.handle('analisar_gopro_raw', (event, pastaBlade: string) => {
     return analisarGoProRaw(pastaBlade, event.sender)
   })
+
+  ipcMain.handle('substituir_videos_360', withArthDone((event, outputFolder: string, targetFolder: string, dryRun: boolean) => {
+    return substituirVideos360(outputFolder, targetFolder, dryRun, event.sender)
+  }))
 
   ipcMain.handle('corrigir_blade_split', withArthDone((event, filePath: string, correcoes: any[]) => {
     return corrigirBladeSplit(filePath, correcoes, event.sender)

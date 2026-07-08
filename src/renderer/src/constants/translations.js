@@ -20,6 +20,7 @@ export const translations = {
       { id: 5, label: "Gerar Relatório de Altitudes",  icon: "gps",      short: "Altitude relativa", group: "Ferramentas" },
       { id: 14, label: "Vincular Fotos a CSV", icon: "organize", short: "Match fotos/metadados", group: "Ferramentas" },
       { id: 17, label: "Auditar Planilha Smartsheet",  icon: "organize", short: "Auditoria Smartsheet",  group: "Ferramentas" },
+      { id: 20, label: "Substituir Vídeos Insta360", icon: "photos", short: "Substituição 360", group: "Ferramentas" },
       // Módulo 18 (Processar Vídeo 360°) arquivado — pywebview não dava o controle de UX
       // necessário. Código 100% preservado (ver tag git archive/camera360-pywebview);
       // descomentar esta linha + os pontos equivalentes em ModuleForm.jsx e App.jsx restaura.
@@ -220,6 +221,21 @@ export const translations = {
         options: [],
         action: null,
       },
+      20: {
+        title: "20. Substituir Vídeos Insta360",
+        desc: "Varre a pasta de destino (D:\\360) em busca de vídeos e os substitui pelos vídeos correspondentes (mesmo nome) exportados do Insta360 Studio.",
+        inputs: [
+          { inputId: "insta_output_dir", label: "Origem (Insta360 Studio)", placeholder: "Clique para selecionar a pasta com os vídeos exportados", type: "folder",
+            hint: "Pasta com os vídeos finalizados/costurados do Insta360 Studio (ex: D:\\OUTPUT INSTA360 STUDIO)" },
+          { inputId: "turbinas_dir",     label: "Destino (Turbinas 360)",   placeholder: "Clique para selecionar a pasta das turbinas", type: "folder",
+            hint: "Pasta raiz das turbinas em que você está trabalhando (ex: D:\\360)" }
+        ],
+        options: [
+          { optionId: "dry_run", label: "Dry-run", choices: ["Não", "Sim"],
+            desc: "Simula o processo e lista quais vídeos seriam substituídos sem alterar nenhum arquivo físico" }
+        ],
+        action: "Substituir Vídeos"
+      },
     },
     log_title: "Log de Execução",
     log_placeholder: "A saída da ferramenta aparecerá aqui.",
@@ -259,6 +275,7 @@ export const translations = {
       { id: 14, label: "Link Arthnex/CSV",     icon: "organize", short: "Match photos/metadata",  group: "Platform" },
       { id: 15, label: "Calibrate GoPro RAW Z", icon: "gps",      short: "Fixed 500mm step",      group: "Arthbot"  },
       { id: 16, label: "Horizon Processor",      icon: "file",     short: "Horizon packaging",    group: "Horizon"  },
+      { id: 20, label: "Replace Insta360 Videos", icon: "photos", short: "Insta360 Replacer", group: "Tools" },
     ],
     fields: {
       1: {
@@ -438,6 +455,21 @@ export const translations = {
         inputs: [],
         options: [],
         action: null,
+      },
+      20: {
+        title: "20. Replace Insta360 Videos",
+        desc: "Scans the target turbines folder (D:\\360) and replaces video files with matching stitched/exported videos from Insta360 Studio output.",
+        inputs: [
+          { inputId: "insta_output_dir", label: "Source (Insta360 Studio)", placeholder: "Click to select folder with stitched videos", type: "folder",
+            hint: "Folder containing stitched/exported videos from Insta360 Studio (e.g. D:\\OUTPUT INSTA360 STUDIO)" },
+          { inputId: "turbinas_dir",     label: "Target (Turbines 360)",   placeholder: "Click to select the turbines folder", type: "folder",
+            hint: "Root folder containing the turbine directories (e.g. D:\\360)" }
+        ],
+        options: [
+          { optionId: "dry_run", label: "Dry-run", choices: ["No", "Yes"],
+            desc: "Simulates the replace run without performing the copy operations on files" }
+        ],
+        action: "Replace Videos"
       },
     },
     log_title: "Execution Log",
