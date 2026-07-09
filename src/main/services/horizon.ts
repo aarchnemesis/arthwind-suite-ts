@@ -301,6 +301,267 @@ function toDamageCsv(data: any[]): string {
   return csvLines.join('\r\n')
 }
 
+interface MappingEntry {
+  Component: string
+  Material: string
+  Type: string
+  Subtype: string
+  _is_checkpoint?: boolean
+  _subtype_by_severity?: Record<string, string>
+  _flag_severity?: string[]
+  alternativas?: { Subtype: string }[]
+}
+
+const HORIZON_MAPPING: Record<string, MappingEntry> = {
+  // --- SURFACE ---
+  "contaminated layer":   { Component: "Blade", Material: "Surface",    Type: "Discoloration",  Subtype: "Other" },
+  "dirt /contamination":  { Component: "Blade", Material: "Surface",    Type: "Discoloration",  Subtype: "Mechanical (Oil)" },
+  "dirt":                 { Component: "Blade", Material: "Surface",    Type: "Discoloration",  Subtype: "Mechanical (Oil)" },
+  "oxidation":            { Component: "Blade", Material: "Surface",    Type: "Discoloration",  Subtype: "Other" },
+  "fungi":                { Component: "Blade", Material: "Surface",    Type: "Discoloration",  Subtype: "Other" },
+  "depression":           { Component: "Blade", Material: "Surface",    Type: "None",           Subtype: "None" },
+  "resin excess":         { Component: "Blade", Material: "Surface",    Type: "None",           Subtype: "None" },
+  "foreign object":       { Component: "Blade", Material: "Surface",    Type: "Foreign Object", Subtype: "None" },
+  "gap":                  { Component: "Blade", Material: "Surface",    Type: "Core Gap",       Subtype: "None" },
+  "step in upstand":      { Component: "Blade", Material: "Surface",    Type: "Delamination",   Subtype: "Wrinkle" },
+
+  // --- LAMINATE ---
+  "bubbles":              { Component: "Blade", Material: "Laminate",   Type: "Air Inclusion",  Subtype: "Other" },
+  "microbubbles":         { Component: "Blade", Material: "Laminate",   Type: "Air Inclusion",  Subtype: "Other" },
+  "semi dry glass":       { Component: "Blade", Material: "Laminate",   Type: "Delamination",   Subtype: "Dry Glass" },
+  "dry glass":            { Component: "Blade", Material: "Laminate",   Type: "Delamination",   Subtype: "Dry Glass" },
+  "wrinkle":              { Component: "Blade", Material: "Laminate",   Type: "Delamination",   Subtype: "Wrinkle" },
+  "step":                 { Component: "Blade", Material: "Laminate",   Type: "Delamination",   Subtype: "Wrinkle" },
+  "folded layer":         { Component: "Blade", Material: "Laminate",   Type: "Delamination",   Subtype: "Wrinkle" },
+  "damaged layer":        { Component: "Blade", Material: "Laminate",   Type: "Delamination",   Subtype: "None" },
+  "damaged laminate":     { Component: "Blade", Material: "Laminate",   Type: "Delamination",   Subtype: "None" },
+  "improper repair":      { Component: "Blade", Material: "Laminate",   Type: "Delamination",   Subtype: "Old Repair" },
+
+  // --- STRUCTURE ---
+  "delamination":                         { Component: "Blade", Material: "Structure", Type: "Delamination", Subtype: "None" },
+  "root upstand delamination":            { Component: "Blade", Material: "Structure", Type: "Delamination", Subtype: "None" },
+  "missing layer":                        { Component: "Blade", Material: "Structure", Type: "Delamination", Subtype: "None" },
+  "holes in laminate":                    { Component: "Blade", Material: "Structure", Type: "Delamination", Subtype: "None" },
+  "lightning strike":                     { Component: "Blade", Material: "Structure", Type: "Delamination", Subtype: "Lightning" },
+  "crack in the laminate":                { Component: "Blade", Material: "Structure", Type: "Crack",        Subtype: "T-l-c Shaped" },
+  "crack in the laminate longitudinal":   { Component: "Blade", Material: "Structure", Type: "Crack",        Subtype: "Longitudinal" },
+  "crack in the laminate transversal":    { Component: "Blade", Material: "Structure", Type: "Crack",        Subtype: "Transverse" },
+  "te insert crack":                      { Component: "Blade", Material: "Structure", Type: "Crack",        Subtype: "Longitudinal" },
+  "crack around receptor":                { Component: "Blade", Material: "Structure", Type: "Crack",        Subtype: "Longitudinal" },
+  "core contamination":                   { Component: "Blade", Material: "Structure", Type: "Balsa Rot",    Subtype: "None" },
+  "core material damaged":                { Component: "Blade", Material: "Structure", Type: "Balsa Rot",    Subtype: "None" },
+  "damaged core":                         { Component: "Blade", Material: "Structure", Type: "Balsa Rot",    Subtype: "None" },
+
+  // --- BONDLINE ---
+  "bonding paste failure":    { Component: "Blade", Material: "Bondline", Type: "Bondline Failure", Subtype: "None" },
+  "crack in the bonding line": { Component: "Blade", Material: "Bondline", Type: "Crack",            Subtype: "Transverse", alternativas: [{ Subtype: "Longitudinal" }] },
+
+  // --- LPS ---
+  "lps disconnected/damaged": {
+    Component: "Lightning Protection System", Material: "Auxiliary Component",
+    Type: "LPS Cable", Subtype: "None",
+    _subtype_by_severity: { "2": "None", "4": "Disconnected" },
+    _flag_severity: ["3"]
+  },
+  "absence of the lps card":  { Component: "Lightning Protection System", Material: "Auxiliary Component", Type: "LPS Cable",      Subtype: "None" },
+  "lps connections":          { Component: "Lightning Protection System", Material: "Auxiliary Component", Type: "Lug Connector",   Subtype: "Disconnected" },
+  "lps receptor missing":     { Component: "Lightning Receptors",         Material: "Auxiliary Component", Type: "Missing",         Subtype: "None" },
+  "metallic tip missing":     { Component: "Lightning Receptors",         Material: "Auxiliary Component", Type: "Missing",         Subtype: "None" },
+  "check lps receptor":       { Component: "Other",                       Material: "Auxiliary Component", Type: "Other",           Subtype: "None" },
+
+  // --- ROOT / CLOSEOUT ---
+  "close out sealant damaged":    { Component: "Root Closeout", Material: "Auxiliary Component", Type: "Circumference Debonding", Subtype: "None" },
+  "absence of close out cover":   { Component: "Root Closeout", Material: "Auxiliary Component", Type: "Damaged Or Misaligned",   Subtype: "None" },
+
+  // --- PITCH SYSTEM ---
+  "gap in the root insert":   { Component: "Pitch System",    Material: "Auxiliary Component", Type: "Bolts", Subtype: "None" },
+  "missing stud":             { Component: "Pitch System",    Material: "Auxiliary Component", Type: "Bolts", Subtype: "None" },
+
+  // --- SEALS / DRAINAGE ---
+  "sealant damaged":          { Component: "Seals",           Material: "Auxiliary Component", Type: "None",                  Subtype: "None" },
+  "drain hole obstructed":    { Component: "Drainage System", Material: "Auxiliary Component", Type: "Damaged Or Obstructed", Subtype: "None" },
+
+  // --- HUB ---
+  "damaged studs":            { Component: "Hub",   Material: "Auxiliary Component", Type: "Other", Subtype: "None" },
+
+  // --- OTHER ---
+  "damaged accessory":        { Component: "Other", Material: "Auxiliary Component", Type: "Other", Subtype: "None" },
+
+  // --- CHECK POINTS (excluídos do output) ---
+  "check point":      { Component: "Other", Material: "Auxiliary Component", Type: "Other", Subtype: "None", _is_checkpoint: true },
+  "check close poi":  { Component: "Other", Material: "Auxiliary Component", Type: "Other", Subtype: "None", _is_checkpoint: true },
+  "check damage":     { Component: "Other", Material: "Auxiliary Component", Type: "Other", Subtype: "None", _is_checkpoint: true },
+  "check delete":     { Component: "Other", Material: "Auxiliary Component", Type: "Other", Subtype: "None", _is_checkpoint: true },
+  "check repair done":{ Component: "Other", Material: "Auxiliary Component", Type: "Other", Subtype: "None", _is_checkpoint: true },
+}
+
+export const SKYSPECS_COLUMNS = [
+  "Photo File Name", "Date", "Component", "Material", "Type", "Subtype",
+  "Damage Location", "Blade Side", "Severity", "Width (m)", "Length (m)",
+  "Distance (m)", "Coordinates"
+]
+
+function remapSeverity(skyType: string, skyMaterial: string, sevStr: string, widthStr: string, subtype = ""): [string, string] {
+  const sev = parseInt(sevStr, 10)
+  if (isNaN(sev)) {
+    return [sevStr, ""]
+  }
+
+  // Discoloration Mec.Oil → sempre Sev 2, inclusive quando sev original é 0
+  if (skyType === "Discoloration" && subtype === "Mechanical (Oil)") {
+    if (sev !== 2) {
+      return ["2", `Sev convertida Discoloration Mec.Oil: ${sev}➔2`]
+    }
+    return [sevStr, ""]
+  }
+
+  if (sev === 0) {
+    return [sevStr, ""]
+  }
+
+  if (skyType === "Bondline Failure") {
+    const wCm = parseFloat(widthStr) * 100
+    if (isNaN(wCm)) {
+      return [sevStr, "ALERTA: largura inválida para Bondline Failure"]
+    }
+    const newSev = wCm <= 25 ? 4 : 5
+    return [String(newSev), `Sev recalculada por largura (${wCm.toFixed(1)}cm): ${sev}➔${newSev}`]
+  }
+
+  if (skyType === "Delamination") {
+    if (sev === 2) {
+      return ["3", "Sev convertida Delamination: 2➔3"]
+    }
+    return [sevStr, ""]
+  }
+
+  if (skyType === "Crack" && skyMaterial === "Structure") {
+    const remap: Record<number, number> = { 3: 4, 4: 4, 5: 5 }
+    if (sev in remap) {
+      const newSev = remap[sev]
+      const nota = newSev !== sev ? `Sev convertida Crack: ${sev}➔${newSev}` : ""
+      return [String(newSev), nota]
+    }
+    return [sevStr, ""]
+  }
+
+  return [sevStr, ""]
+}
+
+interface DmgConversionResult {
+  convertedRows: any[]
+  flags: any[]
+}
+
+function convertDamagesDf(df: any[], filename: string): DmgConversionResult {
+  const convertedRows: any[] = []
+  const flags: any[] = []
+
+  // Coluna de superfície (Internal/External)
+  const surfaceCol = Object.keys(df[0] || {}).find(c => {
+    const l = c.toLowerCase()
+    return l.includes('surface') || l.includes('internal') || l.includes('external')
+  })
+
+  df.forEach(row => {
+    const arthwindType = String(row["Type"] || "").trim()
+    const key = arthwindType.toLowerCase()
+    const mapEntry = HORIZON_MAPPING[key]
+    let flag = ""
+    let isCheckpoint = false
+
+    let component = ""
+    let material = ""
+    let skyType = ""
+    let subtypeOut = ""
+    const severityOrig = String(row["Severity"] || "").trim()
+
+    if (mapEntry) {
+      component = mapEntry.Component
+      material = mapEntry.Material
+      skyType = mapEntry.Type
+      let subtype = mapEntry.Subtype
+      isCheckpoint = !!mapEntry._is_checkpoint
+
+      if (mapEntry._subtype_by_severity) {
+        const sevMap = mapEntry._subtype_by_severity
+        const flagSevs = mapEntry._flag_severity || []
+        if (severityOrig in sevMap) {
+          subtype = sevMap[severityOrig]
+          if (flagSevs.includes(severityOrig)) {
+            flag = `ALERTA: Sev ${severityOrig} — subtype ambíguo, revisar manualmente`
+          }
+        } else {
+          flag = `ALERTA: LPS Sev ${severityOrig} sem regra definida — subtype padrão aplicado`
+        }
+      }
+
+      subtypeOut = subtype || ""
+
+      if (mapEntry.alternativas) {
+        const altList = mapEntry.alternativas.map(a => a.Subtype)
+        flag = `ALERTA: Subtype ambíguo — alternativas: ${altList.join(', ')}`
+      }
+    } else {
+      // Tipo não cadastrado no MAPPING → cai automaticamente no bucket "Other" da SkySpecs
+      component = "Other"
+      material = "Auxiliary Component"
+      skyType = "Other"
+      subtypeOut = "None"
+      flag = `ALERTA: Tipo '${arthwindType}' não encontrado no mapeamento — conversão de nomenclatura automática para Other/Other. Revisar manualmente.`
+    }
+
+    if (severityOrig === "0" && !isCheckpoint) {
+      flag = (flag ? flag + " | " : "") + "ALERTA: Severidade 0 em registro que não é Check Point"
+    }
+
+    const widthStr = String(row["Width"] || "0")
+    const [severityFinal, sevNota] = remapSeverity(skyType, material, severityOrig, widthStr, subtypeOut)
+    if (sevNota) {
+      flag = (flag ? flag + " | " : "") + sevNota
+    }
+
+    if (isCheckpoint) {
+      return
+    }
+
+    const rawSurface = surfaceCol ? String(row[surfaceCol] || "").trim().toLowerCase() : ""
+    const damageLocation = rawSurface === "external" ? "External" : "Internal"
+
+    if (flag) {
+      flags.push({
+        "Arquivo": filename,
+        "Foto": String(row["Photo File Name"] || ""),
+        "Tipo original": arthwindType,
+        "Component (novo)": component,
+        "Material (novo)": material,
+        "Type (novo)": skyType,
+        "Subtype (novo)": subtypeOut,
+        "Severity (novo)": severityFinal,
+        "FLAG": flag
+      })
+    }
+
+    convertedRows.push({
+      "Photo File Name": String(row["Photo File Name"] || ""),
+      "Date":            String(row["Date"] || ""),
+      "Component":       component,
+      "Material":        material,
+      "Type":            skyType,
+      "Subtype":         subtypeOut,
+      "Damage Location": damageLocation,
+      "Blade Side":      String(row["Blade Side"] || ""),
+      "Severity":        severityFinal,
+      "Width (m)":       widthStr,
+      "Length (m)":      String(row["Length"] || ""),
+      "Distance (m)":    String(row["Distance"] || ""),
+      "Coordinates":     String(row["Coordinates"] || "").replace(/\s+/g, "")
+    })
+  })
+
+  return { convertedRows, flags }
+}
+
 // ─── Core Services ───────────────────────────────────────────────────────────
 
 export async function horizonAnalisar(horizonPaths: string[], atwPaths: string[]): Promise<any> {
@@ -960,6 +1221,8 @@ export async function horizonGerarPacote(
       })
     }
 
+    const allFlags: any[] = []
+
     for (const dp of damagesPaths || []) {
       if (fs.existsSync(dp)) {
         const contentDam = fs.readFileSync(dp, 'utf-8')
@@ -972,27 +1235,37 @@ export async function horizonGerarPacote(
             const dateVal = horizonDates[horizonTurbineName] || ''
             const siteVal = horizonSites[horizonTurbineName] || ''
 
-            dfM.forEach(row => {
-              row['Turbine'] = horizonTurbineName
-              row['Site'] = siteVal
-              row['Inspection Date'] = dateVal
-              row['Date'] = dateVal
-            })
+            const filename = path.basename(dp)
+            const { convertedRows, flags } = convertDamagesDf(dfM, filename)
+            allFlags.push(...flags)
 
-            const zipFilename = `${horizonTurbineName}.csv`
-            zip.file(zipFilename, toDamageCsv(dfM))
-            
-            dfM.forEach(row => {
-              const p = String(row['Photo File Name'] || '').trim()
-              if (p) {
-                const fp = cleanFilename(p)
-                if (!coveredPhotosByTurbine['__all__']) coveredPhotosByTurbine['__all__'] = new Set()
-                coveredPhotosByTurbine['__all__'].add(fp)
-              }
-            })
+            if (convertedRows.length > 0) {
+              convertedRows.forEach(row => {
+                row['Turbine'] = horizonTurbineName
+                row['Site'] = siteVal
+                row['Inspection Date'] = dateVal
+                row['Date'] = dateVal
+              })
+
+              const zipFilename = `${horizonTurbineName}.csv`
+              zip.file(zipFilename, toDamageCsv(convertedRows))
+              
+              convertedRows.forEach(row => {
+                const p = String(row['Photo File Name'] || '').trim()
+                if (p) {
+                  const fp = cleanFilename(p)
+                  if (!coveredPhotosByTurbine['__all__']) coveredPhotosByTurbine['__all__'] = new Set()
+                  coveredPhotosByTurbine['__all__'].add(fp)
+                }
+              })
+            }
           }
         }
       }
+    }
+
+    if (allFlags.length > 0) {
+      zip.file("ALERTAS_CONVERSAO.csv", toCsv(allFlags))
     }
 
     // Validation
