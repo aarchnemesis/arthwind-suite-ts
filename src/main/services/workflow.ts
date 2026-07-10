@@ -2485,6 +2485,83 @@ export async function processarJson(jsonPath: string, webContents?: any): Promis
       }
     })
 
+    // 2. Group by blade and apply interactive confirmation / fallback to LE
+    const bladeGroups: Record<string, any[]> = {}
+    windblades.forEach((item: any) => {
+      const bKey = `${item.blade_position || ''}_${item.blade_sn || ''}`
+      if (!bladeGroups[bKey]) bladeGroups[bKey] = []
+      bladeGroups[bKey].push(item)
+    })
+
+    for (const [, items] of Object.entries(bladeGroups)) {
+      const spItems = items.filter((item: any) => String(item.region || '').trim().toUpperCase() === 'SP')
+      if (spItems.length === 0) continue
+
+      const firstItem = items[0]
+      const bPos = firstItem.blade_position || ''
+      const bSn = firstItem.blade_sn || ''
+      let chosenRegion = "LE"
+
+      const { response } = await dialog.showMessageBox({
+        type: 'question',
+        buttons: ['Não', 'Sim'],
+        defaultId: 1,
+        cancelId: 0,
+        title: `Correção de Região 'SP' - Pá ${bSn}`,
+        message: `Detectamos ${spItems.length} foto(s) com região 'SP' (não especificada) na Pá ${bSn} (Posição ${bPos}).\n\nA primeira fase do voo deve ser LE (Leading Edge).\n\nDeseja renomear automaticamente estas fotos para 'LE' (Leading Edge)?`
+      })
+
+      if (response === 1) {
+        chosenRegion = "LE"
+      } else {
+        const { response: resSS } = await dialog.showMessageBox({
+          type: 'question',
+          buttons: ['Não', 'Sim'],
+          defaultId: 0,
+          cancelId: 0,
+          title: `Correção de Região 'SP' - Pá ${bSn}`,
+          message: `Deseja classificar as ${spItems.length} foto(s) da Pá ${bSn} como 'SS' (Suction Side)?`
+        })
+        if (resSS === 1) {
+          chosenRegion = "SS"
+        } else {
+          const { response: resTE } = await dialog.showMessageBox({
+            type: 'question',
+            buttons: ['Não', 'Sim'],
+            defaultId: 0,
+            cancelId: 0,
+            title: `Correção de Região 'SP' - Pá ${bSn}`,
+            message: `Deseja classificar as ${spItems.length} foto(s) da Pá ${bSn} como 'TE' (Trailing Edge)?`
+          })
+          if (resTE === 1) {
+            chosenRegion = "TE"
+          } else {
+            const { response: resPS } = await dialog.showMessageBox({
+              type: 'question',
+              buttons: ['Não', 'Sim'],
+              defaultId: 0,
+              cancelId: 0,
+              title: `Correção de Região 'SP' - Pá ${bSn}`,
+              message: `Deseja classificar as ${spItems.length} foto(s) da Pá ${bSn} como 'PS' (Pressure Side)?`
+            })
+            if (resPS === 1) {
+              chosenRegion = "PS"
+            } else {
+              sendLog(`⚠ Todas as opções de região foram recusadas pelo usuário para a Pá ${bSn}. Definido para a região padrão 'LE'.`, "warning")
+              chosenRegion = "LE"
+            }
+          }
+        }
+      }
+
+      spItems.forEach((item: any) => {
+        item.region = chosenRegion
+        const originalName = item.image_metadata?.original_file_name || ''
+        sendLog(`✔ Região da foto '${originalName}' (Pá ${bSn}, ${bPos}) corrigida automaticamente para '${chosenRegion}'.`, "success")
+      })
+      jsonModified = true
+    }
+
     if (jsonModified) {
       fs.writeFileSync(jsonPath, JSON.stringify(data, null, 2), 'utf-8')
       sendLog("✔ Arquivo JSON atualizado com as correções de região.", "success")
