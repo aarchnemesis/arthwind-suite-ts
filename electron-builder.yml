@@ -1,5 +1,5 @@
 appId: com.electron.app
-productName: arthwind-suite-ts-temp
+productName: Arthwind Suite
 directories:
   buildResources: build
 files:
@@ -12,7 +12,8 @@ files:
 asarUnpack:
   - resources/**
 win:
-  executableName: arthwind-suite-ts-temp
+  executableName: arthwind-suite-ts
+  icon: build/icon.ico
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
