@@ -2669,17 +2669,18 @@ export async function organizarFotosJson(jsonPath: string, sourceFolder: string,
 
       if (!originalName || !targetPath) return
 
-      const src = imageCache[originalName.toLowerCase()]
+      const src = imageCache[_normalizeFilename(originalName)]
       if (!src) {
         missing.push(originalName)
         return
       }
 
-      const parts = targetPath.split(/[\\/]/)
-      const relativeParts = parts.slice(-3) // ex: ['A', 'LE', 'image.jpg']
-      const destPath = path.join(rootFolder, ...relativeParts)
-      
-      fs.mkdirSync(path.dirname(destPath), { recursive: true })
+      const parts = targetPath.split(/[\\/]/).filter(Boolean)
+      const dirParts = parts.slice(-3, -1) // pastas antes do arquivo, ex: ['A', 'LE']
+      const destDir = path.join(rootFolder, ...dirParts)
+      const destPath = path.join(destDir, path.basename(originalName))
+
+      fs.mkdirSync(destDir, { recursive: true })
       fs.copyFileSync(src, destPath)
       copied++
     })
