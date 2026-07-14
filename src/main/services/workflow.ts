@@ -2569,7 +2569,45 @@ export async function processarJson(jsonPath: string, webContents?: any): Promis
 
     const rootFolder = path.dirname(jsonPath)
     sendLog("Mapeando fotos nas pastas locais A/B/C...", "info")
-    const imageCache = _buildImageCache(rootFolder)
+    
+    const zeroBytePhotos: { name: string; folder: string }[] = []
+    const imageCache: Record<string, string> = {}
+    
+    for (const sub of ['A', 'B', 'C']) {
+      const p = path.join(rootFolder, sub)
+      if (fs.existsSync(p) && fs.statSync(p).isDirectory()) {
+        const walk = (dir: string) => {
+          const list = fs.readdirSync(dir, { withFileTypes: true })
+          for (const f of list) {
+            const fullPath = path.join(dir, f.name)
+            if (f.isDirectory()) {
+              if (!f.name.startsWith('.')) walk(fullPath)
+            } else {
+              const ext = path.extname(f.name).toUpperCase()
+              if (SUPPORTED_EXTS.has(ext)) {
+                try {
+                  const stat = fs.statSync(fullPath)
+                  if (stat.size === 0) {
+                    zeroBytePhotos.push({ name: f.name, folder: sub })
+                    sendLog(`❌ Foto corrompida (0 bytes): '${f.name}' na pasta ${sub}.`, "error")
+                  }
+                } catch (e) {}
+                const normKey = _normalizeFilename(f.name)
+                const lowKey = f.name.toLowerCase()
+                imageCache[normKey] = fullPath
+                imageCache[lowKey] = fullPath
+              }
+            }
+          }
+        }
+        walk(p)
+      }
+    }
+
+    sendLog(`📁 ${Math.round(Object.keys(imageCache).length / 2)} fotos encontradas.`, "info")
+    if (zeroBytePhotos.length > 0) {
+      sendLog(`⚠ Detectadas ${zeroBytePhotos.length} fotos corrompidas (com tamanho 0 bytes). Seus caminhos foram gerados normalmente no CSV para permitir que você as substitua na pasta física pelo seu backup antes do upload.`, "error")
+    }
 
     const missingPhotos: string[] = []
     windblades.forEach((item: any) => {
