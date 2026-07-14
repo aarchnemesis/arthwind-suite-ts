@@ -2570,9 +2570,22 @@ export async function processarJson(jsonPath: string, webContents?: any): Promis
     const rootFolder = path.dirname(jsonPath)
     sendLog("Mapeando fotos nas pastas locais A/B/C...", "info")
     
-    const zeroBytePhotos: { name: string; folder: string }[] = []
+    // Mapa nome normalizado → dados do windblade (para enriquecer o relatório de fotos corrompidas)
+    const windbladeByFile: Record<string, { bladeSn: string; bladePosition: string; region: string }> = {}
+    windblades.forEach((item: any) => {
+      const original = item.image_metadata?.original_file_name
+      if (original) {
+        windbladeByFile[_normalizeFilename(original)] = {
+          bladeSn: item.blade_sn || '',
+          bladePosition: item.blade_position || '',
+          region: item.region || ''
+        }
+      }
+    })
+
+    const zeroBytePhotos: { name: string; folder: string; bladeSn: string; bladePosition: string; region: string }[] = []
     const imageCache: Record<string, string> = {}
-    
+
     for (const sub of ['A', 'B', 'C']) {
       const p = path.join(rootFolder, sub)
       if (fs.existsSync(p) && fs.statSync(p).isDirectory()) {
@@ -2588,7 +2601,9 @@ export async function processarJson(jsonPath: string, webContents?: any): Promis
                 try {
                   const stat = fs.statSync(fullPath)
                   if (stat.size === 0) {
-                    zeroBytePhotos.push({ name: f.name, folder: sub })
+                    const normKey = _normalizeFilename(f.name)
+                    const info = windbladeByFile[normKey] || { bladeSn: '', bladePosition: '', region: '' }
+                    zeroBytePhotos.push({ name: f.name, folder: sub, ...info })
                     sendLog(`❌ Foto corrompida (0 bytes): '${f.name}' na pasta ${sub}.`, "error")
                   }
                 } catch (e) {}
@@ -2607,6 +2622,28 @@ export async function processarJson(jsonPath: string, webContents?: any): Promis
     sendLog(`📁 ${Math.round(Object.keys(imageCache).length / 2)} fotos encontradas.`, "info")
     if (zeroBytePhotos.length > 0) {
       sendLog(`⚠ Detectadas ${zeroBytePhotos.length} fotos corrompidas (com tamanho 0 bytes). Seus caminhos foram gerados normalmente no CSV para permitir que você as substitua na pasta física pelo seu backup antes do upload.`, "error")
+
+      const reportPath = path.join(rootFolder, `fotos_corrompidas_0_bytes_${new Date().toISOString().replace(/[:.]/g, '-')}.txt`)
+      const reportLines = [
+        "Arthwind Suite — fotos corrompidas (0 bytes)",
+        `Data: ${new Date().toISOString()}`,
+        `Total: ${zeroBytePhotos.length} foto(s)`,
+        "--------------------------------------------------",
+        ...zeroBytePhotos.map(zb =>
+          `ID/Nome: ${zb.name} | Pasta: ${zb.folder} | Blade SN: ${zb.bladeSn || '?'} | Posição: ${zb.bladePosition || '?'} | Região: ${zb.region || '?'}`
+        )
+      ]
+      fs.writeFileSync(reportPath, reportLines.join('\n'), 'utf-8')
+      sendLog(`Lista de fotos corrompidas salva em ${path.basename(reportPath)} (na pasta do JSON).`, "warning")
+
+      await dialog.showMessageBox({
+        type: 'warning',
+        buttons: ['OK'],
+        defaultId: 0,
+        title: 'Fotos Corrompidas Detectadas (0 bytes)',
+        message: `Detectamos ${zeroBytePhotos.length} foto(s) com 0 bytes (corrompidas) nas pastas A/B/C.`,
+        detail: `Os caminhos delas foram incluídos normalmente no CSV final, mas você deve substituí-las pelo backup físico antes do upload.\n\nUma lista completa foi salva em:\n${reportPath}`
+      })
     }
 
     const missingPhotos: string[] = []
