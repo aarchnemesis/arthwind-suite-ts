@@ -2619,7 +2619,8 @@ export async function processarJson(jsonPath: string, webContents?: any): Promis
       }
     }
 
-    sendLog(`📁 ${Math.round(Object.keys(imageCache).length / 2)} fotos encontradas.`, "info")
+    const uniquePhotosCount = new Set(Object.values(imageCache)).size
+    sendLog(`📁 ${uniquePhotosCount} fotos encontradas.`, "info")
     if (zeroBytePhotos.length > 0) {
       sendLog(`⚠ Detectadas ${zeroBytePhotos.length} fotos corrompidas (com tamanho 0 bytes). Seus caminhos foram gerados normalmente no CSV para permitir que você as substitua na pasta física pelo seu backup antes do upload.`, "error")
 
