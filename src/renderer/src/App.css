@@ -353,7 +353,7 @@ html, body, #root {
   min-width: 0;
 }
 
-/* Módulos complexos (Workflow, Horizon, VideoTools) usam largura total */
+/* Módulos complexos (Workflow, Horizon) usam largura total */
 .module-form.wide {
   max-width: none;
 }

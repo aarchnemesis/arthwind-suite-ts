@@ -21,10 +21,6 @@ export const translations = {
       { id: 14, label: "Vincular Fotos a CSV", icon: "organize", short: "Match fotos/metadados", group: "Ferramentas" },
       { id: 17, label: "Auditar Planilha Smartsheet",  icon: "organize", short: "Auditoria Smartsheet",  group: "Ferramentas" },
       { id: 20, label: "Substituir Vídeos Insta360", icon: "photos", short: "Substituição 360", group: "Ferramentas" },
-      // Módulo 18 (Processar Vídeo 360°) arquivado — pywebview não dava o controle de UX
-      // necessário. Código 100% preservado (ver tag git archive/camera360-pywebview);
-      // descomentar esta linha + os pontos equivalentes em ModuleForm.jsx e App.jsx restaura.
-      // { id: 18, label: "Processar Vídeo 360° (Arthbot)", icon: "photos",   short: "Calibração e Corte", group: "Arthbot" },
       { id: 16, label: "Horizon Processor",    icon: "file",     short: "Empacotamento Horizon", group: "Plataforma do Cliente" },
       { id: 9, label: "Documentação",     icon: "docs",     short: "Manual passo a passo", group: "Suporte" },
     ],
@@ -203,13 +199,6 @@ export const translations = {
       17: {
         title: "17. Análise de Workflow",
         desc: "Audita a planilha do Smartsheet, cruza campanhas e acha escapes/recoletas de inspeção de pás.",
-        inputs: [],
-        options: [],
-        action: null,
-      },
-      18: {
-        title: "Processar Vídeo 360° (Arthbot)",
-        desc: "Calibração Z do odômetro e renderização de vídeo 360° equiretangular com telemetria e corte.",
         inputs: [],
         options: [],
         action: null,
@@ -571,10 +560,6 @@ export const docContent = {
     {
       title: "Módulo 17: Análise de Workflow (Auditor Smartsheet)",
       body: "Audita a planilha do Smartsheet cruzando-a com dados de e-mails de coletas diárias para encontrar divergências, revoos ou escapes de aerogeradores.\n\n**Passo a passo:**\n1. Escolha a Origem do Smartsheet: API (Internas ou Externas) ou Local (selecionando um arquivo .xlsx manualmente).\n2. Opcional (Auditoria de E-mail): Ative a opção e escolha entre ler e-mails via conexão IMAP direta (Gmail) ou fornecendo um arquivo de e-mail exportado (.eml) ou texto copiado da coleta diária.\n3. Defina as datas de início e fim da inspeção (opcional) e carregue o arquivo de inspeções da coletora (se houver).\n4. Clique em **Analisar Workflow** para gerar o painel com as campanhas identificadas, divergências encontradas, taxa de conformidade e o cruzamento detalhado.\n5. Clique em **Exportar SR Pendente** para gerar e abrir uma planilha Excel separada apenas com os aerogeradores do Smartsheet que possuem Status 'Vermelho', contendo as colunas essenciais: WO, Parque, Cliente, Turbina, Piloto e Data da Coleta."
-    },
-    {
-      title: "Módulo 18: Processar Vídeo 360° (Arthbot)",
-      body: "Calibra, corta e renderiza o vídeo 360° equiretangular do Arthbot, gravando a telemetria de Z como marca d'água diretamente no arquivo de saída.\n\n**Passo a passo:**\n1. No painel lateral direito, selecione o arquivo de vídeo 360° (.mp4), o CSV de telemetria gerado pelo Arthbot e a pasta de destino do output.\n2. Reproduza o vídeo e use os controles de playback para navegar (Espaço = play/pause, ← → = quadro a quadro, Shift+← → = ±5s).\n3. **Calibração Z (Fix Z):** Se o odômetro do Arthbot não bater com o projeto, pause o vídeo em 3 marcos conhecidos, clique em 'Get' para capturar o Z da câmera e preencha o Z real do projeto ao lado. O algoritmo de interpolação linear por partes (Piecewise) corrigirá automaticamente todos os valores intermediários.\n4. **Corte:** Defina Z Início e Z Fim (em mm) para delimitar a região de inspeção relevante. A Margem de Segurança estende o corte alguns milímetros além dos limites para garantir que nenhuma parte da pá seja cortada.\n5. **Marca d'água:** Clique em 'Selecionar Posição da Marca' para abrir o posicionador. No modo plano, clique diretamente sobre a luz do Arthbot — a posição clicada é exatamente a coluna gravada no vídeo. No modo 3D, navegue arrastando a esfera e clique em 'Marcar aqui' para fixar o ponto central.\n6. Ajuste a velocidade de reprodução e ative 'Inverter reprodução' se o vídeo foi gravado da ponta para a raiz.\n7. Clique em **Renderizar Vídeo Cortado** — o FFmpeg processa em background e exibe o progresso em tempo real.\n\n**Painel de perspectivas:** As 4 miniaturas à esquerda (0° Frente, 90° Direita, 180° Trás, 270° Esquerda) são recortes rectilineares renderizados ao vivo pela cena 3D — clique em uma miniatura para o player principal girar para aquela direção."
     }
   ],
   en: [
@@ -641,10 +626,6 @@ export const docContent = {
     {
       title: "Module 17: Workflow Analysis (Smartsheet Auditor)",
       body: "Audits the Smartsheet spreadsheet by cross-referencing it with daily collection emails to find discrepancies, reflights, or wind turbine escapes.\n\n**Step by step:**\n1. Choose the Smartsheet Source: API (Internal or External) or Local (manually selecting a .xlsx file).\n2. Optional (Email Audit): Enable the option and choose between reading emails via direct IMAP connection (Gmail) or providing an exported email file (.eml) or text copied from the daily collection.\n3. Define the start and end dates of the inspection (optional) and load the collector's inspection file (if any).\n4. Click **Analisar Workflow** to generate the dashboard with identified campaigns, found discrepancies, compliance rate, and detailed cross-referencing.\n5. Click **Exportar SR Pendente** to generate and open a separate Excel spreadsheet listing only Smartsheet turbines with 'Vermelho' Status, containing the essential columns: WO, Parque, Cliente, Turbina, Piloto, and Data da Coleta."
-    },
-    {
-      title: "Module 18: Process 360° Video (Arthbot)",
-      body: "Calibrates, trims, and renders the Arthbot equirectangular 360° video, burning the Z telemetry as a watermark directly into the output file.\n\n**Step by step:**\n1. In the right-side panel, select the 360° video file (.mp4), the Arthbot-generated telemetry CSV, and the output destination folder.\n2. Play the video and use the playback controls to navigate (Space = play/pause, ← → = frame by frame, Shift+← → = ±5s).\n3. **Z Calibration (Fix Z):** If the Arthbot odometer does not match the engineering project values, pause the video at 3 known reference points, click 'Get' to capture the camera Z, and fill in the real project Z alongside it. The piecewise linear interpolation algorithm will automatically correct all intermediate values.\n4. **Trim:** Set Z Start and Z End (in mm) to bound the relevant inspection region. The Safety Margin extends the cut a few millimeters beyond the limits to ensure no part of the blade is accidentally clipped.\n5. **Watermark:** Click 'Selecionar Posição da Marca' to open the positioner. In flat mode, click directly on the Arthbot light — the clicked position is exactly the column burned into the video. In 3D mode, drag to navigate the sphere and click 'Marcar aqui' to lock the center crosshair.\n6. Adjust playback speed and enable 'Inverter reprodução' if the video was recorded tip-to-root.\n7. Click **Renderizar Vídeo Cortado** — FFmpeg processes in the background and shows real-time progress.\n\n**Perspective panel:** The 4 thumbnails on the left (0° Front, 90° Right, 180° Back, 270° Left) are live rectilinear crops rendered from the shared 3D scene — click any thumbnail to snap the main player to that direction."
     }
   ],
 };

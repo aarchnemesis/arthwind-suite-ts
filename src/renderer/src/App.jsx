@@ -61,7 +61,6 @@ export default function ArthwindSuite() {
   const module = T.fields[active];
 
   // Módulos com layout próprio que ocupam a largura total
-  // (módulo 18 — Vídeo 360° — arquivado, ver translations.js)
   const isWideModule = active === 11 || active === 16 || active === 17 || active === 19;
 
   // Info do módulo activo (grupo, ícone)
