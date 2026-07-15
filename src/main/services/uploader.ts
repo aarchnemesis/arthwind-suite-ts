@@ -98,41 +98,28 @@ function lerCsv(csvPath: string): Promise<Record<string, string>[]> {
   })
 }
 
-export async function uploadCsv(
+function normalizarNomePa(name: string): string {
+  return name.replace(/[_-]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase()
+}
+
+async function processarUploadCsv(
   csvPath: string,
+  rows: Record<string, string>[],
   workorderId: string,
   windbladeId: string,
   pSurface: string,
   collectDate: string,
   turbineId: string,
-  useHomolog = false,
-  webContents?: any
-): Promise<any> {
-  const sendLog = (text: string, type = 'info') => {
-    if (webContents) {
-      webContents.send('arthlog', { type, text })
-    }
-  }
-
-  const sendProgress = (current: number, total: number) => {
-    if (webContents) {
-      webContents.send('arthprogress', { current, total })
-    }
-  }
-
-  const sendDone = () => {
-    if (webContents) {
-      webContents.send('arthdone', {})
-    }
-  }
-
+  useHomolog: boolean,
+  sendLog: (text: string, type?: string) => void,
+  sendProgress: (current: number, total: number) => void
+): Promise<{ success: boolean; enviados: number; total: number; falhas: any[]; error?: string }> {
   try {
     const fotosDir = path.dirname(csvPath)
     const base = getClientBase(useHomolog)
-    const rows = await lerCsv(csvPath)
-    
+
     if (!rows || rows.length === 0) {
-      return { success: false, error: "CSV vazio ou sem linhas válidas." }
+      return { success: false, enviados: 0, total: 0, falhas: [], error: "CSV vazio ou sem linhas válidas." }
     }
 
     const technology = pSurface === "internal" ? "Arthbot" : "Arthdrone"
@@ -188,7 +175,7 @@ export async function uploadCsv(
     const presigns = await presignResp.json() as any[]
 
     if (!presigns || presigns.length === 0) {
-      return { success: false, error: "Nenhuma foto retornada pelo servidor (já enviadas, ou nada a enviar)." }
+      return { success: false, enviados: 0, total: 0, falhas: [], error: "Nenhuma foto retornada pelo servidor (já enviadas, ou nada a enviar)." }
     }
 
     await fetch(`${base}save-collect-date`, {
@@ -257,11 +244,94 @@ export async function uploadCsv(
     }
 
     sendLog(`Upload concluído: ${enviados}/${total} fotos enviadas.`, falhas.length === 0 ? "success" : "warn")
-    sendDone()
     return { success: true, enviados, total, falhas }
   } catch (err: any) {
     sendLog(`Erro no upload: ${err.message}`, "error")
-    sendDone()
-    return { success: false, error: err.message }
+    return { success: false, enviados: 0, total: 0, falhas: [], error: err.message }
+  }
+}
+
+export async function uploadMultiplasCsv(
+  csvPaths: string[],
+  workorderId: string,
+  pSurface: string,
+  collectDate: string,
+  useHomolog = false,
+  webContents?: any
+): Promise<any> {
+  const sendLog = (text: string, type = 'info') => {
+    if (webContents) webContents.send('arthlog', { type, text })
+  }
+  const sendProgress = (current: number, total: number) => {
+    if (webContents) webContents.send('arthprogress', { current, total })
+  }
+  const sendFileProgress = (fileIndex: number, fileTotal: number, fileName: string) => {
+    if (webContents) webContents.send('arthnex_batch_progress', { fileIndex, fileTotal, fileName })
+  }
+
+  const resultados: any[] = []
+  let totalEnviados = 0
+  let totalFotos = 0
+  let arquivosComFalha = 0
+
+  try {
+    sendLog(`Buscando pás pendentes da workorder para casar com os CSVs...`, 'info')
+    const blades = await listarPasPendentes(workorderId, useHomolog)
+    const bladesPorNome: Record<string, any> = {}
+    for (const b of blades) {
+      bladesPorNome[normalizarNomePa(b.blade)] = b
+    }
+
+    for (let i = 0; i < csvPaths.length; i++) {
+      const csvPath = csvPaths[i]
+      const fileName = path.basename(csvPath)
+      sendFileProgress(i + 1, csvPaths.length, fileName)
+      sendLog(`\n=== Arquivo ${i + 1}/${csvPaths.length}: ${fileName} ===`, 'info')
+
+      let rows: Record<string, string>[]
+      try {
+        rows = await lerCsv(csvPath)
+      } catch (e: any) {
+        sendLog(`Falha ao ler ${fileName}: ${e.message}`, 'error')
+        resultados.push({ arquivo: fileName, success: false, error: e.message })
+        arquivosComFalha++
+        continue
+      }
+
+      const bladeSerial = rows[0]?.blade || ''
+      const matched = bladesPorNome[normalizarNomePa(bladeSerial)]
+
+      if (!bladeSerial || !matched) {
+        sendLog(`⚠ Pá '${bladeSerial || '(vazio)'}' do CSV '${fileName}' não foi encontrada entre as pás pendentes desta workorder. Pulando...`, 'warning')
+        resultados.push({ arquivo: fileName, success: false, error: `Pá '${bladeSerial}' não encontrada na workorder` })
+        arquivosComFalha++
+        continue
+      }
+
+      sendLog(`   Pá detectada: ${bladeSerial} ➔ ${matched.blade} (${matched.turbine})`, 'info')
+
+      const r = await processarUploadCsv(
+        csvPath, rows, workorderId, String(matched.id), pSurface, collectDate, String(matched.turbine_id), useHomolog,
+        sendLog, sendProgress
+      )
+
+      resultados.push({ arquivo: fileName, blade: matched.blade, turbine: matched.turbine, ...r })
+      if (r.success) {
+        totalEnviados += r.enviados
+        totalFotos += r.total
+        if (r.falhas.length > 0) arquivosComFalha++
+      } else {
+        arquivosComFalha++
+      }
+    }
+
+    sendLog(`\n=== LOTE FINALIZADO ===`, 'info')
+    sendLog(`Arquivos processados: ${csvPaths.length}, com falha: ${arquivosComFalha}`, arquivosComFalha === 0 ? 'success' : 'warn')
+    sendLog(`Total de fotos enviadas: ${totalEnviados}/${totalFotos}`, 'success')
+
+    return { success: true, resultados, totalEnviados, totalFotos, arquivosComFalha }
+  } catch (err: any) {
+    sendLog(`Erro crítico no upload em lote: ${err.message}`, 'error')
+    return { success: false, error: err.message, resultados }
   }
 }

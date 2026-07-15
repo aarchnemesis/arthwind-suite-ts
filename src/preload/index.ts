@@ -33,7 +33,7 @@ const ipcMethods = [
   'pick_files',
   'arthnex_listar_workorders',
   'arthnex_listar_pas',
-  'arthnex_upload',
+  'arthnex_upload_multi',
   // Novos métodos adicionados do Módulo de Workflow & Auditoria
   'testar_conexao_imap',
   'buscar_smartsheet_api',
@@ -64,6 +64,7 @@ const events = [
   'arthlog',
   'arthdone',
   'arthprogress',
+  'arthnex_batch_progress',
   'gps_fotos_loaded',
   'blade_split_analise',
   'fotos_reconstruir_loaded',

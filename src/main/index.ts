@@ -44,7 +44,7 @@ import {
 import {
   listarWorkorders,
   listarPasPendentes,
-  uploadCsv
+  uploadMultiplasCsv
 } from './services/uploader'
 import { substituirVideos360 } from './services/videoReplacer'
 import { enviarVideosDrive } from './services/videoUploader'
@@ -199,9 +199,19 @@ app.whenReady().then(() => {
     return result.filePaths[0] || null
   })
 
-  ipcMain.handle('pick_files', async () => {
+  ipcMain.handle('pick_files', async (_event, fileType?: string) => {
+    let filters: { name: string; extensions: string[] }[] = []
+    if (fileType === 'excel') {
+      filters = [{ name: 'Excel Files', extensions: ['xlsx', 'xls'] }]
+    } else if (fileType === 'csv') {
+      filters = [{ name: 'CSV Files', extensions: ['csv'] }]
+    } else if (fileType === 'json') {
+      filters = [{ name: 'JSON Files', extensions: ['json'] }]
+    }
+
     const result = await dialog.showOpenDialog({
-      properties: ['openFile', 'multiSelections']
+      properties: ['openFile', 'multiSelections'],
+      filters
     })
     if (result.canceled) return []
     return result.filePaths
@@ -368,16 +378,28 @@ app.whenReady().then(() => {
   })
 
   // ─── Uploader IPC Handlers ───────────────────────────────────────────────────
-  ipcMain.handle('arthnex_listar_workorders', (_event, useHomolog?: boolean) => {
-    return listarWorkorders(useHomolog)
+  // A UI espera { success, data|error } — as funções do serviço retornam o array cru
+  // da API da Arthnex (ou lançam em caso de erro HTTP), então o wrapping é feito aqui.
+  ipcMain.handle('arthnex_listar_workorders', async (_event, useHomolog?: boolean) => {
+    try {
+      const data = await listarWorkorders(useHomolog)
+      return { success: true, data }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
   })
 
-  ipcMain.handle('arthnex_listar_pas', (_event, workorderId: string, useHomolog?: boolean) => {
-    return listarPasPendentes(workorderId, useHomolog)
+  ipcMain.handle('arthnex_listar_pas', async (_event, workorderId: string, useHomolog?: boolean) => {
+    try {
+      const data = await listarPasPendentes(workorderId, useHomolog)
+      return { success: true, data }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
   })
 
-  ipcMain.handle('arthnex_upload', (event, csvPath: string, workorderId: string, windbladeId: string, pSurface: string, collectDate: string, turbineId: string, useHomolog?: boolean) => {
-    return uploadCsv(csvPath, workorderId, windbladeId, pSurface, collectDate, turbineId, useHomolog, event.sender)
+  ipcMain.handle('arthnex_upload_multi', (event, csvPaths: string[], workorderId: string, pSurface: string, collectDate: string, useHomolog?: boolean) => {
+    return uploadMultiplasCsv(csvPaths, workorderId, pSurface, collectDate, useHomolog, event.sender)
   })
 
   // ─── Horizon IPC Handlers ────────────────────────────────────────────────────
