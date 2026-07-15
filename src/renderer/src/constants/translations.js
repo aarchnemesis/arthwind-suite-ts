@@ -280,6 +280,7 @@ export const translations = {
       { id: 14, label: "Link Arthnex/CSV",     icon: "organize", short: "Match photos/metadata",  group: "Platform" },
       { id: 15, label: "Calibrate GoPro RAW Z", icon: "gps",      short: "Fixed 500mm step",      group: "Arthbot"  },
       { id: 16, label: "Horizon Processor",      icon: "file",     short: "Horizon packaging",    group: "Horizon"  },
+      { id: 17, label: "Workflow Analysis (Smartsheet)", icon: "organize", short: "Smartsheet Audit", group: "Tools" },
       { id: 20, label: "Replace Insta360 Videos", icon: "photos", short: "Insta360 Replacer", group: "Tools" },
       { id: 21, label: "Upload Arthfilm Videos to Drive", icon: "upload", short: "Arthfilm to Drive", group: "Tools" },
     ],
@@ -455,6 +456,13 @@ export const translations = {
         options: [],
         action: null,
       },
+      17: {
+        title: "17. Workflow Analysis (Smartsheet)",
+        desc: "Audits the Smartsheet spreadsheet, cross-referencing it with daily inspection emails to find discrepancies, reflights, or escapes.",
+        inputs: [],
+        options: [],
+        action: null,
+      },
       19: {
         title: "19. Arthnex Uploader",
         desc: "Uploads photos to Arthnex via CSV + presigned URLs (same API as the official Image Uploader), fixing the name sent to the server when the photo path has subfolders (common for Arthdrone).",
@@ -592,6 +600,18 @@ export const docContent = {
     {
       title: "Módulo 17: Análise de Workflow (Auditor Smartsheet)",
       body: "Audita a planilha do Smartsheet cruzando-a com dados de e-mails de coletas diárias para encontrar divergências, revoos ou escapes de aerogeradores.\n\n**Passo a passo:**\n1. Escolha a Origem do Smartsheet: API (Internas ou Externas) ou Local (selecionando um arquivo .xlsx manualmente).\n2. Opcional (Auditoria de E-mail): Ative a opção e escolha entre ler e-mails via conexão IMAP direta (Gmail) ou fornecendo um arquivo de e-mail exportado (.eml) ou texto copiado da coleta diária.\n3. Defina as datas de início e fim da inspeção (opcional) e carregue o arquivo de inspeções da coletora (se houver).\n4. Clique em **Analisar Workflow** para gerar o painel com as campanhas identificadas, divergências encontradas, taxa de conformidade e o cruzamento detalhado.\n5. Clique em **Exportar SR Pendente** para gerar e abrir uma planilha Excel separada apenas com os aerogeradores do Smartsheet que possuem Status 'Vermelho', contendo as colunas essenciais: WO, Parque, Cliente, Turbina, Piloto e Data da Coleta."
+    },
+    {
+      title: "Módulo 19: Arthnex Uploader",
+      body: "Sobe fotos para a plataforma Arthnex via API utilizando URLs pré-assinadas e um arquivo CSV.\n\n**Passo a passo:**\n1. Selecione o CSV contendo a relação de fotos e metadados gerado para a plataforma.\n2. Selecione a pasta onde estão localizados os arquivos de foto reais.\n3. Insira suas credenciais da API do Arthnex.\n4. Clique em Executar para iniciar o upload automático."
+    },
+    {
+      title: "Módulo 20: Substituir Vídeos Insta360",
+      body: "Varre a pasta de destino em busca de vídeos unstitched e os substitui pelos vídeos equivalentes de alta resolução exportados do Insta360 Studio.\n\n**Passo a passo:**\n1. Selecione a pasta de Origem com os vídeos finalizados/costurados do Insta360 Studio.\n2. Selecione a pasta de Destino das turbinas.\n3. Ative a opção Dry-run para simular o processo sem alterar arquivos físicos.\n4. Clique em Substituir Vídeos para processar."
+    },
+    {
+      title: "Módulo 21: Enviar Vídeos Arthfilm para o Drive",
+      body: "Varre a pasta local da turbina e envia os vídeos da pasta '360 watermark' (ou '360_watermark') para a subpasta equivalente 'FINAL' no Google Drive por paridade de diretórios.\n\n**Passo a passo:**\n1. Selecione a pasta local da turbina contendo os vídeos exportados pelo Arthfilm.\n2. Selecione a pasta correspondente da turbina no drive virtual G:.\n3. Ative a opção Dry-run para simular a criação de pastas e mapeamento de arquivos.\n4. Clique em Sincronizar Vídeos para copiar os arquivos."
     }
   ],
   en: [
@@ -658,6 +678,18 @@ export const docContent = {
     {
       title: "Module 17: Workflow Analysis (Smartsheet Auditor)",
       body: "Audits the Smartsheet spreadsheet by cross-referencing it with daily collection emails to find discrepancies, reflights, or wind turbine escapes.\n\n**Step by step:**\n1. Choose the Smartsheet Source: API (Internal or External) or Local (manually selecting a .xlsx file).\n2. Optional (Email Audit): Enable the option and choose between reading emails via direct IMAP connection (Gmail) or providing an exported email file (.eml) or text copied from the daily collection.\n3. Define the start and end dates of the inspection (optional) and load the collector's inspection file (if any).\n4. Click **Analisar Workflow** to generate the dashboard with identified campaigns, found discrepancies, compliance rate, and detailed cross-referencing.\n5. Click **Exportar SR Pendente** to generate and open a separate Excel spreadsheet listing only Smartsheet turbines with 'Vermelho' Status, containing the essential columns: WO, Parque, Cliente, Turbina, Piloto, and Data da Coleta."
+    },
+    {
+      title: "Module 19: Arthnex Uploader",
+      body: "Uploads photos to the Arthnex platform via API using presigned URLs and a CSV file.\n\n**Step by step:**\n1. Select the CSV containing the relationship between photos and metadata generated for the platform.\n2. Select the folder where the real photo files are located.\n3. Enter your Arthnex API credentials.\n4. Click Execute to start the automatic upload."
+    },
+    {
+      title: "Module 20: Replace Insta360 Videos",
+      body: "Scans the target directory for unstitched videos and replaces them with equivalent high-resolution videos exported from Insta360 Studio.\n\n**Step by step:**\n1. Select the Source folder containing the stitched videos from Insta360 Studio.\n2. Select the Target turbines folder.\n3. Enable Dry-run to simulate the process without modifying physical files.\n4. Click Replace Videos to execute."
+    },
+    {
+      title: "Module 21: Upload Arthfilm Videos to Drive",
+      body: "Maps the local turbine's '360 watermark' folders and copies organized videos to the equivalent 'FINAL' folder in Google Drive by folder parity.\n\n**Step by step:**\n1. Select the local turbine folder containing the videos exported by Arthfilm.\n2. Select the equivalent turbine folder on the virtual drive G:.\n3. Enable Dry-run to simulate directory creation and file mapping.\n4. Click Sync Videos to copy the files."
     }
   ],
 };
