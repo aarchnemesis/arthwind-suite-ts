@@ -29,8 +29,13 @@ export async function enviarVideosDrive(
       return { success: false, error: 'Pasta de destino no Drive não existe.' }
     }
 
-    // 1. Escaneamento recursivo da pasta local à procura de pastas "360 watermark"
-    sendLog(`Escaneando pasta local por diretórios '360 watermark'...`, 'info')
+    // Helper para normalizar nomes de diretório (substitui underscores/traços por espaços e tira excessos)
+    const normalize = (name: string) => {
+      return name.replace(/[_-]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase()
+    }
+
+    // 1. Escaneamento recursivo da pasta local à procura de pastas "360 watermark" ou "360 watermarked"
+    sendLog(`Escaneando pasta local por diretórios de output de marca d'água...`, 'info')
     const localWatermarkDirs: string[] = []
 
     function scanDir(dir: string) {
@@ -38,8 +43,8 @@ export async function enviarVideosDrive(
       for (const entry of list) {
         const fullPath = path.join(dir, entry.name)
         if (entry.isDirectory()) {
-          const normName = entry.name.replace(/_/g, ' ').trim().toLowerCase()
-          if (normName === '360 watermark') {
+          const normName = normalize(entry.name)
+          if (normName === '360 watermark' || normName === '360 watermarked') {
             localWatermarkDirs.push(fullPath)
           } else if (!entry.name.startsWith('.')) {
             scanDir(fullPath)
@@ -49,42 +54,96 @@ export async function enviarVideosDrive(
     }
 
     scanDir(localTurbineFolder)
-    sendLog(`Varredura finalizada. Localizada(s) ${localWatermarkDirs.length} pasta(s) '360 watermark'.`, 'info')
+    sendLog(`Varredura finalizada. Localizada(s) ${localWatermarkDirs.length} pasta(s) de vídeos.`, 'info')
 
     if (localWatermarkDirs.length === 0) {
-      sendLog(`Nenhuma pasta de vídeos '360 watermark' foi encontrada na turbina local.`, 'warning')
+      sendLog(`Nenhuma pasta de vídeos (ex: '360 WATERMARKED') foi encontrada na turbina local.`, 'warning')
       return { success: true, copiedFolders: 0, copiedFiles: 0 }
     }
 
     let copiedFolders = 0
     let copiedFiles = 0
 
-    // 2. Processar cada pasta mapeada
+    // 2. Processar cada pasta de watermark mapeada
     for (const srcWatermark of localWatermarkDirs) {
-      // Obter o caminho relativo a partir da raiz da turbina selecionada
-      const relPath = path.relative(localTurbineFolder, srcWatermark)
-      // Ex: BLADE 0342\360-03HRS\360 watermark -> divide em partes
-      const parts = relPath.split(path.sep)
-      // Remove o último elemento ('360 watermark') para obter o caminho da pá e horário
-      const subpathParts = parts.slice(0, -1)
-      const subpath = path.join(...subpathParts)
+      // Identificar a pasta local da pá (pasta pai da watermark)
+      const localBladePath = path.dirname(srcWatermark)
+      const localBladeName = path.basename(localBladePath)
+      const normLocalBladeName = normalize(localBladeName)
 
-      // Caminho correspondente do Drive finalizando com "FINAL"
-      const destFinalDir = path.join(driveTurbineFolder, subpath, 'FINAL')
-      sendLog(`Mapeado: [${subpath}] ➔ Destino: [${destFinalDir}]`, 'info')
+      sendLog(`Processando vídeos da pá: ${localBladeName}...`, 'info')
 
-      // Ler subpastas de região (LE 3 horas, CE 3 horas etc)
+      // Buscar a pasta correspondente da pá no Google Drive (ex: BLADE_0487 no PC -> BLADE 0487 ou BLADE_0487 no Drive)
+      const driveEntries = fs.readdirSync(driveTurbineFolder, { withFileTypes: true })
+      let matchedDriveBladeName = ''
+      
+      for (const entry of driveEntries) {
+        if (entry.isDirectory()) {
+          if (normalize(entry.name) === normLocalBladeName) {
+            matchedDriveBladeName = entry.name
+            break
+          }
+        }
+      }
+
+      if (!matchedDriveBladeName) {
+        sendLog(`⚠ Não foi possível encontrar a pasta correspondente no Drive para a pá local '${localBladeName}' (buscado por: '${normLocalBladeName}'). Pulando...`, 'warning')
+        continue
+      }
+
+      const driveBladePath = path.join(driveTurbineFolder, matchedDriveBladeName)
+      sendLog(`   Mapeado Pá: ${localBladeName} ➔ ${matchedDriveBladeName}`, 'info')
+
+      // Ler subpastas de região de vídeo (CE_3h, CE_9h, LE_3h, LE_9h etc)
       const regions = fs.readdirSync(srcWatermark, { withFileTypes: true })
       for (const reg of regions) {
-        const srcRegPath = path.join(srcWatermark, reg.name)
         if (reg.isDirectory()) {
-          const destRegPath = path.join(destFinalDir, reg.name)
-          sendLog(`   ➡ Copiando região: ${reg.name}`, 'info')
+          const regName = reg.name
+          const srcRegPath = path.join(srcWatermark, regName)
+          const normRegName = regName.toLowerCase()
+
+          // Detectar a faixa de horário (3h ou 9h)
+          let timeSlot = 3
+          if (normRegName.includes('9h') || normRegName.includes('9hrs') || normRegName.includes('9 horas')) {
+            timeSlot = 9
+          }
+
+          // Buscar pasta de horário correspondente no Drive da pá (ex: 360-03HRS ou 360-09HRS)
+          const driveBladeEntries = fs.readdirSync(driveBladePath, { withFileTypes: true })
+          let matchedTimeFolderName = ''
+
+          for (const entry of driveBladeEntries) {
+            if (entry.isDirectory()) {
+              const normEntry = normalize(entry.name)
+              if (timeSlot === 3) {
+                if (normEntry.includes('3h') || normEntry.includes('3hrs') || normEntry.includes('03hrs') || normEntry.includes('3 horas')) {
+                  matchedTimeFolderName = entry.name
+                  break
+                }
+              } else if (timeSlot === 9) {
+                if (normEntry.includes('9h') || normEntry.includes('9hrs') || normEntry.includes('09hrs') || normEntry.includes('9 horas')) {
+                  matchedTimeFolderName = entry.name
+                  break
+                }
+              }
+            }
+          }
+
+          // Se não encontrou a pasta de horário, usa uma nomenclatura padrão padrão do Drive
+          if (!matchedTimeFolderName) {
+            matchedTimeFolderName = timeSlot === 3 ? '360-03HRS' : '360-09HRS'
+            sendLog(`   ⚠ Pasta do horário (${timeSlot}h) não localizada no Drive. Será criada como: '${matchedTimeFolderName}'`, 'warning')
+          }
+
+          // Montar o caminho final no Drive: Blade -> Horário -> FINAL -> Região
+          const destRegPath = path.join(driveBladePath, matchedTimeFolderName, 'FINAL', regName)
+          sendLog(`   ➡ Copiando: [${localBladeName} ➔ ${regName}] ➔ [${matchedTimeFolderName} ➔ FINAL ➔ ${regName}]`, 'info')
 
           if (!dryRun) {
             fs.mkdirSync(destRegPath, { recursive: true })
           }
 
+          // Copiar os vídeos
           const files = fs.readdirSync(srcRegPath, { withFileTypes: true })
           for (const file of files) {
             if (file.isFile()) {
@@ -92,7 +151,7 @@ export async function enviarVideosDrive(
               const destFilePath = path.join(destRegPath, file.name)
 
               if (dryRun) {
-                sendLog(`      [Dry-run] Copiaria arquivo: ${file.name}`, 'success')
+                sendLog(`      [Dry-run] Copiaria: ${file.name}`, 'success')
                 copiedFiles++
               } else {
                 try {
@@ -111,10 +170,10 @@ export async function enviarVideosDrive(
     }
 
     sendLog(`\n=== PROCESSO FINALIZADO ===`, 'info')
-    sendLog(`Total de pastas de regiões criadas/atualizadas: ${copiedFolders}`, 'success')
+    sendLog(`Total de regiões processadas: ${copiedFolders}`, 'success')
     sendLog(`Total de arquivos de vídeos copiados: ${copiedFiles}`, 'success')
     if (!dryRun) {
-      sendLog(`Nota: O Google Drive para Computador sincronizará os novos arquivos em background.`, 'info')
+      sendLog(`Nota: O Google Drive para Computador começará a subir os arquivos na nuvem automaticamente.`, 'info')
     }
 
     return { success: true, copiedFolders, copiedFiles }
