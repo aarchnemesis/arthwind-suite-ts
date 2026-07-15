@@ -47,6 +47,7 @@ import {
   uploadCsv
 } from './services/uploader'
 import { substituirVideos360 } from './services/videoReplacer'
+import { enviarVideosDrive } from './services/videoUploader'
 
 // Configuration Helpers
 function getConfigPath(): string {
@@ -335,6 +336,10 @@ app.whenReady().then(() => {
 
   ipcMain.handle('substituir_videos_360', withArthDone((event, outputFolder: string, targetFolder: string, dryRun: boolean) => {
     return substituirVideos360(outputFolder, targetFolder, dryRun, event.sender)
+  }))
+
+  ipcMain.handle('enviar_videos_drive', withArthDone((event, localFolder: string, driveFolder: string, dryRun: boolean) => {
+    return enviarVideosDrive(localFolder, driveFolder, dryRun, event.sender)
   }))
 
   ipcMain.handle('corrigir_blade_split', withArthDone((event, filePath: string, correcoes: any[]) => {

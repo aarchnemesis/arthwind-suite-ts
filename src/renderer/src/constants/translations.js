@@ -21,6 +21,7 @@ export const translations = {
       { id: 14, label: "Vincular Fotos a CSV", icon: "organize", short: "Match fotos/metadados", group: "Ferramentas" },
       { id: 17, label: "Auditar Planilha Smartsheet",  icon: "organize", short: "Auditoria Smartsheet",  group: "Ferramentas" },
       { id: 20, label: "Substituir Vídeos Insta360", icon: "photos", short: "Substituição 360", group: "Ferramentas" },
+      { id: 21, label: "Enviar Vídeos Arthfilm para o Drive", icon: "upload", short: "Arthfilm para o Drive", group: "Ferramentas" },
       { id: 16, label: "Horizon Processor",    icon: "file",     short: "Empacotamento Horizon", group: "Plataforma do Cliente" },
       { id: 9, label: "Documentação",     icon: "docs",     short: "Manual passo a passo", group: "Suporte" },
     ],
@@ -225,6 +226,21 @@ export const translations = {
         ],
         action: "Substituir Vídeos"
       },
+      21: {
+        title: "21. Enviar Vídeos Arthfilm para o Drive",
+        desc: "Varre a pasta local da turbina e envia os vídeos da pasta '360 watermark' (ou '360_watermark') para a subpasta equivalente 'FINAL' no Google Drive por paridade de diretórios.",
+        inputs: [
+          { inputId: "local_turbine_dir", label: "Origem (Turbina Local no PC)", placeholder: "Selecione a pasta local da turbina", type: "folder",
+            hint: "Pasta local da turbina contendo os vídeos (ex: D:\\360\\WTG-VSR03-03)" },
+          { inputId: "drive_turbine_dir", label: "Destino (Turbina no Google Drive)", placeholder: "Selecione a pasta equivalente no Drive virtual", type: "folder",
+            hint: "Pasta equivalente no drive virtual G: (ex: G:\\.shortcut-targets-by-id\\...\\WTG-VSR03-03)" }
+        ],
+        options: [
+          { optionId: "dry_run", label: "Dry-run", choices: ["Não", "Sim"],
+            desc: "Simula o mapeamento e lista os vídeos que seriam enviados sem gravá-los fisicamente" }
+        ],
+        action: "Sincronizar Vídeos"
+      },
     },
     log_title: "Log de Execução",
     log_placeholder: "A saída da ferramenta aparecerá aqui.",
@@ -265,6 +281,7 @@ export const translations = {
       { id: 15, label: "Calibrate GoPro RAW Z", icon: "gps",      short: "Fixed 500mm step",      group: "Arthbot"  },
       { id: 16, label: "Horizon Processor",      icon: "file",     short: "Horizon packaging",    group: "Horizon"  },
       { id: 20, label: "Replace Insta360 Videos", icon: "photos", short: "Insta360 Replacer", group: "Tools" },
+      { id: 21, label: "Upload Arthfilm Videos to Drive", icon: "upload", short: "Arthfilm to Drive", group: "Tools" },
     ],
     fields: {
       1: {
@@ -459,6 +476,21 @@ export const translations = {
             desc: "Simulates the replace run without performing the copy operations on files" }
         ],
         action: "Replace Videos"
+      },
+      21: {
+        title: "21. Upload Arthfilm Videos to Drive",
+        desc: "Maps the local turbine's '360 watermark' (or '360_watermark') folders and copies organized videos to the equivalent 'FINAL' folder in Google Drive by folder parity.",
+        inputs: [
+          { inputId: "local_turbine_dir", label: "Source (Local Turbine Folder)", placeholder: "Select local turbine folder", type: "folder",
+            hint: "Local turbine folder containing watermark subfolders (e.g. D:\\360\\WTG-VSR03-03)" },
+          { inputId: "drive_turbine_dir", label: "Destination (Google Drive Folder)", placeholder: "Select equivalent folder on Drive virtual drive", type: "folder",
+            hint: "Equivalent turbine folder on virtual drive G: (e.g. G:\\.shortcut-targets-by-id\\...\\WTG-VSR03-03)" }
+        ],
+        options: [
+          { optionId: "dry_run", label: "Dry-run", choices: ["No", "Yes"],
+            desc: "Simulates the sync run and lists files that would be uploaded without writing them" }
+        ],
+        action: "Sync Videos"
       },
     },
     log_title: "Execution Log",

@@ -109,6 +109,8 @@ export default function usePyWebView() {
       const bladeDir = filePaths["blade_dir"] || "";
       const instaOutputDir = filePaths["insta_output_dir"] || "";
       const turbinasDir     = filePaths["turbinas_dir"] || "";
+      const localTurbineDir = filePaths["local_turbine_dir"] || "";
+      const driveTurbineDir = filePaths["drive_turbine_dir"] || "";
       const modo     = "P";
       const dryRun   = ["Sim", "Yes"].includes(options["dry_run"] || "");
       const xlsx     = ["Sim", "Yes"].includes(options["gen_xlsx"] || "");
@@ -144,6 +146,7 @@ export default function usePyWebView() {
         );
       else if (active === 14) api.vincular_arthnex_csv(csvPath, fotosDir);
       else if (active === 20) api.substituir_videos_360(instaOutputDir, turbinasDir, dryRun);
+      else if (active === 21) api.enviar_videos_drive(localTurbineDir, driveTurbineDir, dryRun);
       return;
     }
 

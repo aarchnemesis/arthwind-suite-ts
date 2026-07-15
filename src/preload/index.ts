@@ -46,6 +46,7 @@ const ipcMethods = [
   'horizon_gerar_pacote',
   'horizon_corrigir_damages_direto',
   'substituir_videos_360',
+  'enviar_videos_drive',
   'detectar_estrutura_abc',
   'ler_json_referencia_pixel_mm',
   'reconstruir_csv_multi',
