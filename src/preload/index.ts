@@ -34,6 +34,7 @@ const ipcMethods = [
   'arthnex_listar_workorders',
   'arthnex_listar_pas',
   'arthnex_upload_multi',
+  'arthnex_descobrir_csvs',
   // Novos métodos adicionados do Módulo de Workflow & Auditoria
   'testar_conexao_imap',
   'buscar_smartsheet_api',

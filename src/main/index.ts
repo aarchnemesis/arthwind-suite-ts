@@ -44,7 +44,8 @@ import {
 import {
   listarWorkorders,
   listarPasPendentes,
-  uploadMultiplasCsv
+  uploadMultiplasCsv,
+  descobrirCsvsUpload
 } from './services/uploader'
 import { substituirVideos360 } from './services/videoReplacer'
 import { enviarVideosDrive } from './services/videoUploader'
@@ -400,6 +401,10 @@ app.whenReady().then(() => {
 
   ipcMain.handle('arthnex_upload_multi', (event, csvPaths: string[], workorderId: string, pSurface: string, collectDate: string, useHomolog?: boolean) => {
     return uploadMultiplasCsv(csvPaths, workorderId, pSurface, collectDate, useHomolog, event.sender)
+  })
+
+  ipcMain.handle('arthnex_descobrir_csvs', (_event, rootPath: string) => {
+    return descobrirCsvsUpload(rootPath)
   })
 
   // ─── Horizon IPC Handlers ────────────────────────────────────────────────────

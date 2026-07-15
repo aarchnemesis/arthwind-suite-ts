@@ -83,6 +83,19 @@ export default function ArthnexUploaderModule({ T, D }) {
     }
   };
 
+  const pickFolder = async () => {
+    const folder = await window.pywebview.api.pick_folder();
+    if (!folder) return;
+    setLogs(prev => [...prev, { text: `Procurando CSVs de upload em: ${folder}...`, type: 'info' }]);
+    const found = await window.pywebview.api.arthnex_descobrir_csvs(folder);
+    if (found.length === 0) {
+      addLog(`Nenhum CSV de upload encontrado em ${folder}.`, 'warning');
+      return;
+    }
+    setCsvPaths(prev => [...new Set([...prev, ...found])]);
+    addLog(`${found.length} CSV(s) de upload encontrado(s) e adicionado(s).`, 'success');
+  };
+
   const removeCsv = (path) => {
     setCsvPaths(prev => prev.filter(p => p !== path));
   };
@@ -137,12 +150,20 @@ export default function ArthnexUploaderModule({ T, D }) {
           CSVs de upload — um por pá (as fotos devem estar na mesma pasta de cada CSV). A pá de cada
           arquivo é detectada automaticamente pela coluna "blade" e casada com as pás pendentes da workorder.
         </label>
-        <button onClick={pickCsvs} disabled={running || !workorderId} style={{
-          padding: '7px 12px', borderRadius: '5px', border: `1px solid ${D.border}`,
-          background: D.bgCard, color: D.textPrimary, cursor: (running || !workorderId) ? 'not-allowed' : 'pointer', fontSize: '12px',
-        }}>
-          Selecionar CSV(s)
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button onClick={pickCsvs} disabled={running || !workorderId} style={{
+            padding: '7px 12px', borderRadius: '5px', border: `1px solid ${D.border}`,
+            background: D.bgCard, color: D.textPrimary, cursor: (running || !workorderId) ? 'not-allowed' : 'pointer', fontSize: '12px',
+          }}>
+            Selecionar CSV(s)
+          </button>
+          <button onClick={pickFolder} disabled={running || !workorderId} style={{
+            padding: '7px 12px', borderRadius: '5px', border: `1px solid ${D.border}`,
+            background: D.bgCard, color: D.textPrimary, cursor: (running || !workorderId) ? 'not-allowed' : 'pointer', fontSize: '12px',
+          }}>
+            Procurar em pasta (turbina/pá)
+          </button>
+        </div>
         {csvPaths.length > 0 && (
           <div style={{
             marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px',

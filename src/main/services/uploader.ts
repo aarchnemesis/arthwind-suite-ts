@@ -102,6 +102,53 @@ function normalizarNomePa(name: string): string {
   return name.replace(/[_-]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase()
 }
 
+// Colunas que só existem no CSV de upload (photo_data já convertido pra formato Arthnex),
+// o suficiente pra distinguir de outros CSVs do fluxo (telemetria, relatório de altitude,
+// blade split etc.) sem precisar ler o arquivo inteiro — só a linha de cabeçalho.
+const COLUNAS_CSV_UPLOAD = ['image_id', 'blade', 'region']
+
+function lerCabecalhoCsv(csvPath: string): string[] {
+  const fd = fs.openSync(csvPath, 'r')
+  const buffer = Buffer.alloc(4096)
+  const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0)
+  fs.closeSync(fd)
+  const primeiraLinha = buffer.subarray(0, bytesRead).toString('utf-8').split(/\r?\n/)[0]
+  return primeiraLinha.replace(/^﻿/, '').split(',').map(h => h.trim().toLowerCase())
+}
+
+function ehCsvDeUpload(csvPath: string): boolean {
+  try {
+    const headers = lerCabecalhoCsv(csvPath)
+    return COLUNAS_CSV_UPLOAD.every(col => headers.includes(col))
+  } catch {
+    return false
+  }
+}
+
+export function descobrirCsvsUpload(rootPath: string): string[] {
+  const encontrados: string[] = []
+
+  function scan(dir: string): void {
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        scan(fullPath)
+      } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.csv') && ehCsvDeUpload(fullPath)) {
+        encontrados.push(fullPath)
+      }
+    }
+  }
+
+  scan(rootPath)
+  return encontrados
+}
+
 async function processarUploadCsv(
   csvPath: string,
   rows: Record<string, string>[],
