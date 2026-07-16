@@ -329,20 +329,30 @@ app.whenReady().then(() => {
     return vincularArthnexCsv(csvPath, fotosDir, event.sender)
   }))
 
-  ipcMain.handle('carregar_fotos_gps', (event, pasta: string) => {
-    return carregarFotosGps(pasta, event.sender)
+  // As três abaixo (GPS, Blade Split, GoPro RAW) alimentam um botão "Analisar" na UI que
+  // fica esperando um evento (gps_fotos_loaded / blade_split_analise / gopro_raw_analise)
+  // pra sair do estado de loading — sem emitir o evento, o botão gira pra sempre mesmo
+  // com o resultado já pronto no retorno da própria função.
+  ipcMain.handle('carregar_fotos_gps', async (event, pasta: string) => {
+    const fotos = await carregarFotosGps(pasta, event.sender)
+    event.sender.send('gps_fotos_loaded', { fotos })
+    return fotos
   })
 
-  ipcMain.handle('analisar_blade_split', (event, filePath: string, threshold: number) => {
-    return analisarBladeSplit(filePath, threshold, event.sender)
+  ipcMain.handle('analisar_blade_split', async (event, filePath: string, threshold: number) => {
+    const suspeitos = await analisarBladeSplit(filePath, threshold, event.sender)
+    event.sender.send('blade_split_analise', { suspeitos })
+    return suspeitos
   })
 
   ipcMain.handle('carregar_fotos_reconstruir', (event, pasta: string) => {
     return carregarFotosReconstruir(pasta, event.sender)
   })
 
-  ipcMain.handle('analisar_gopro_raw', (event, pastaBlade: string) => {
-    return analisarGoProRaw(pastaBlade, event.sender)
+  ipcMain.handle('analisar_gopro_raw', async (event, pastaBlade: string) => {
+    const regioes = await analisarGoProRaw(pastaBlade, event.sender)
+    event.sender.send('gopro_raw_analise', { regioes })
+    return regioes
   })
 
   ipcMain.handle('substituir_videos_360', withArthDone((event, outputFolder: string, targetFolder: string, dryRun: boolean) => {

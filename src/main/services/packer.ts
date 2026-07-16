@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 
-const PACKER_REGION_MAP: Record<string, string> = {
+export const PACKER_REGION_MAP: Record<string, string> = {
   "LE":     "LE",
   "TE":     "TE",
   "CE":     "CE",

@@ -6,6 +6,7 @@ import { ImapFlow } from 'imapflow'
 import { simpleParser } from 'mailparser'
 import { dialog } from 'electron'
 import { cryptoService } from './crypto'
+import { PACKER_REGION_MAP } from './packer'
 
 // ─── Constants and Types ──────────────────────────────────────────────────────
 
@@ -3837,6 +3838,7 @@ export async function calibrarZGoProRaw(
     for (const subdir of list) {
       if (!subdir.isDirectory()) continue
       const region = subdir.name.toUpperCase()
+      if (!(region in PACKER_REGION_MAP)) continue
 
       if (region === 'VISUAL') {
         const outDir = path.join(output, region)
