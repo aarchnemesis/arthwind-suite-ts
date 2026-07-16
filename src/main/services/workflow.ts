@@ -13,6 +13,54 @@ import { PACKER_REGION_MAP } from './packer'
 const SUPPORTED_EXTS = new Set([".JPG", ".JPEG"])
 const _GOPRO_NUM_RE = /G(?:OPR|0\d\d)(\d+)/i
 
+// Split de linha CSV com suporte a campos entre aspas (permite o delimitador aparecer
+// dentro de um campo citado) — o pandas/csv.DictReader do Python tratam isso
+// corretamente; o split ingênuo por delimitador não. Não cobre campo citado com quebra
+// de linha embutida (as linhas já vêm pré-quebradas por \r?\n antes de chegar aqui).
+function parseCsvLine(line: string, delimiter: string): string[] {
+  const result: string[] = []
+  let cur = ''
+  let inQuotes = false
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') {
+          cur += '"'
+          i++
+        } else {
+          inQuotes = false
+        }
+      } else {
+        cur += ch
+      }
+    } else if (ch === '"') {
+      inQuotes = true
+    } else if (ch === delimiter) {
+      result.push(cur)
+      cur = ''
+    } else {
+      cur += ch
+    }
+  }
+  result.push(cur)
+  return result
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+// Python's round() usa "round half to even" (banker's rounding) em vez do
+// "round half away from zero" do Math.round do JS — só divergem exatamente em .5.
+function roundHalfToEven(n: number): number {
+  const floor = Math.floor(n)
+  const diff = n - floor
+  if (diff < 0.5) return floor
+  if (diff > 0.5) return floor + 1
+  return floor % 2 === 0 ? floor : floor + 1
+}
+
 const _CANON_INTERNAL: Record<string, string> = {
   'wo': 'WO', 'parque': 'Parque', 'complexo': 'Parque', 'wtg': 'WTG',
   'aerogerador': 'WTG', 'status': 'Status.', 'ultimoacesso': 'Ultimo Acesso',
@@ -229,7 +277,7 @@ export function parseCsv(content: string): any[] {
   if (lines.length === 0) return []
 
   const delimiter = content.includes(';') ? ';' : ','
-  const headers = lines[0].split(delimiter).map(h => h.trim().replace(/^"|"$/g, ''))
+  const headers = parseCsvLine(lines[0], delimiter).map(h => h.trim().replace(/^"|"$/g, ''))
 
   const results: any[] = []
   for (let i = 1; i < lines.length; i++) {
@@ -342,7 +390,7 @@ function _normalizeFilename(name: string): string {
   return stem + ext
 }
 
-function _buildImageCache(folder: string): Record<string, string> {
+function _buildImageCache(folder: string, sendLog?: (text: string, type?: string) => void): Record<string, string> {
   const cache: Record<string, string> = {}
   const walk = (dir: string) => {
     if (!fs.existsSync(dir)) return
@@ -355,7 +403,9 @@ function _buildImageCache(folder: string): Record<string, string> {
         const ext = path.extname(f.name).toUpperCase()
         if (SUPPORTED_EXTS.has(ext)) {
           const key = _normalizeFilename(f.name)
-          if (!cache[key]) {
+          if (cache[key]) {
+            if (sendLog) sendLog(`⚠ Duplicado ignorado: ${f.name}`, "warning")
+          } else {
             cache[key] = fullPath
           }
         }
@@ -366,7 +416,60 @@ function _buildImageCache(folder: string): Record<string, string> {
   return cache
 }
 
-function _fixPixelMm(values: any[]): number[] {
+// Lista plana de imagens, sem cache/dedup por nome — usada nos pontos em que o Python
+// original percorre a pasta inteira via rglob() e processa cada arquivo físico
+// individualmente, mesmo que dois arquivos em subpastas diferentes tenham o mesmo nome
+// (caso comum em fotos GoPro sequenciais repetidas por região).
+function _listImagesFlat(folder: string): string[] {
+  const results: string[] = []
+  const walk = (dir: string) => {
+    if (!fs.existsSync(dir)) return
+    const list = fs.readdirSync(dir, { withFileTypes: true })
+    for (const f of list) {
+      const fullPath = path.join(dir, f.name)
+      if (f.isDirectory()) {
+        walk(fullPath)
+      } else {
+        const ext = path.extname(f.name).toUpperCase()
+        if (SUPPORTED_EXTS.has(ext)) {
+          results.push(fullPath)
+        }
+      }
+    }
+  }
+  walk(folder)
+  return results
+}
+
+function formatLocationForName(value: any): number {
+  const n = parseFloat(value)
+  return isNaN(n) ? -1 : Math.trunc(n)
+}
+
+function formatMmPx(value: any): string {
+  const n = parseFloat(value)
+  return isNaN(n) ? "UNKNOWN" : n.toFixed(5).replace('.', '_')
+}
+
+function _writeMissingFile(outputDir: string, missing: string[], modulo: string): string {
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+  const outName = `missing_data_${ts}.txt`
+  const outPath = path.join(outputDir, outName)
+  const lines = [
+    "Arthwind Suite — arquivos nao encontrados",
+    `Modulo: ${modulo}`,
+    `Data: ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`,
+    `Total: ${missing.length} arquivo(s)`,
+    "-".repeat(50),
+    ...missing
+  ]
+  fs.writeFileSync(outPath, lines.join('\n') + '\n', 'utf-8')
+  return outName
+}
+
+function _fixPixelMm(values: any[]): any[] {
   const result = [...values]
   const n = result.length
 
@@ -377,7 +480,6 @@ function _fixPixelMm(values: any[]): number[] {
 
   for (let i = 0; i < n; i++) {
     if (isValid(result[i])) {
-      result[i] = parseFloat(result[i])
       continue
     }
 
@@ -933,6 +1035,10 @@ async function _parseOperationalForm(
   return operationalRecords
 }
 
+// Staged matching: (1) site, (2) janela de data ≤45d, (3) preferência de WO, (4) nome da
+// turbina. O nome da turbina só é comparado DENTRO do pool já escolhido por data/WO (nunca
+// misturando entre pools) — isso evita que nomes genéricos (WTG1, WTG2…) cruzem campanhas
+// diferentes. Replica _staged_match do Python (workflow_processor.py) passo a passo.
 function _stagedMatch(
   refDate: string,
   refWo: string,
@@ -942,64 +1048,57 @@ function _stagedMatch(
   candidates: Record<string, any>
 ): { matchedVal: any; woMismatch: boolean } | null {
   const refDateOk = !!refDate && refDate !== 'N/A'
+  const refDt = refDateOk ? parseDate(refDate) : null
 
-  const pool: { keyStr: string; val: any; key: string[] }[] = []
-  for (const [keyStr, val] of Object.entries(candidates)) {
+  const woPool: { val: any; diff: number }[] = []
+  const datePool: { val: any; diff: number }[] = []
+  const nodatePool: any[] = []
+
+  for (const val of Object.values(candidates)) {
     const key = val._key
     if (!key) continue
     const cSiteNorm = key[0]
-    const cTurbNorm = key[1]
+    const candDate = val.date || ''
+    const candDateOk = !!candDate && candDate !== 'N/A'
 
     if (!sitesMatch(refSiteNorm, cSiteNorm, val.turb_orig || '')) {
       continue
     }
 
-    if (!turbinesMatch(refTurbNorm, cTurbNorm, refSiteOrig)) {
-      continue
-    }
-
-    pool.push({ keyStr, val, key })
-  }
-
-  if (pool.length === 0) return null
-
-  const woMatches: { val: any; diff: number }[] = []
-  const dateMatches: { val: any; diff: number }[] = []
-  const noDateMatches: any[] = []
-
-  const refDt = parseDate(refDate)
-
-  for (const item of pool) {
-    const candDate = item.val.date || 'N/A'
-    const candDt = parseDate(candDate)
-
-    if (refDateOk && candDate && candDate !== 'N/A' && refDt && candDt) {
-      const diffDays = Math.ceil(Math.abs(refDt.getTime() - candDt.getTime()) / (1000 * 60 * 60 * 24))
-      if (diffDays <= 45) {
-        if (wosMatch(refWo, item.val.wo || '')) {
-          woMatches.push({ val: item.val, diff: diffDays })
-        } else {
-          dateMatches.push({ val: item.val, diff: diffDays })
-        }
-        continue
+    if (refDateOk && candDateOk) {
+      const candDt = parseDate(candDate)
+      const diff = (refDt && candDt)
+        ? Math.abs(Math.round((refDt.getTime() - candDt.getTime()) / (1000 * 60 * 60 * 24)))
+        : null
+      if (diff === null || diff > 45) continue
+      if (wosMatch(refWo, val.wo || '')) {
+        woPool.push({ val, diff })
+      } else {
+        datePool.push({ val, diff })
       }
+    } else {
+      nodatePool.push(val)
     }
-
-    noDateMatches.push(item.val)
   }
 
-  if (woMatches.length > 0) {
-    woMatches.sort((a, b) => a.diff - b.diff)
-    return { matchedVal: woMatches[0].val, woMismatch: false }
+  let pool: any[]
+  let woMismatch: boolean
+  if (woPool.length > 0) {
+    pool = [...woPool].sort((a, b) => a.diff - b.diff).map(x => x.val)
+    woMismatch = false
+  } else if (datePool.length > 0) {
+    pool = [...datePool].sort((a, b) => a.diff - b.diff).map(x => x.val)
+    woMismatch = true
+  } else {
+    pool = nodatePool
+    woMismatch = false
   }
 
-  if (dateMatches.length > 0) {
-    dateMatches.sort((a, b) => a.diff - b.diff)
-    return { matchedVal: dateMatches[0].val, woMismatch: true }
-  }
-
-  if (noDateMatches.length > 0) {
-    return { matchedVal: noDateMatches[0], woMismatch: false }
+  for (const val of pool) {
+    const key = val._key
+    if (turbinesMatch(refTurbNorm, key[1], refSiteOrig)) {
+      return { matchedVal: val, woMismatch }
+    }
   }
 
   return null
@@ -2338,7 +2437,7 @@ export async function organizarImagens(
     let delimiter = ';'
     if (!csvContent.includes(';')) delimiter = ','
 
-    const lines = csvContent.split(/\r?\n/).map(l => l.split(delimiter))
+    const lines = csvContent.split(/\r?\n/).map(l => parseCsvLine(l, delimiter))
     const headers = lines[0].map(h => h.trim().replace(/^"|"$/g, ''))
     const rows = lines.slice(1).filter(l => l.length >= headers.length).map(l => {
       const obj: any = {}
@@ -2371,11 +2470,9 @@ export async function organizarImagens(
 
     sendLog("Mapeando arquivos na pasta de fotos...", "info")
     const imageCache = _buildImageCache(fotosDir)
-    
+
     const outputDir = path.join(path.dirname(csvPath), "OUTPUT")
-    if (!dryRun && !fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true })
-    }
+    fs.mkdirSync(outputDir, { recursive: true })
 
     let copied = 0
     const missingFiles: string[] = []
@@ -2388,8 +2485,6 @@ export async function organizarImagens(
 
       const blade = String(row['Blade SN']).replace(/[\/*?:"<>|]/g, '').trim()
       const region = String(row['Side']).toUpperCase().trim()
-      const location = parseFloat(row['Location']) || 0
-      const pixelMm = parseFloat(row['Pixel MM']) || 0
       const original = String(row['Original Image']).trim()
 
       const norm = _normalizeFilename(original)
@@ -2401,15 +2496,13 @@ export async function organizarImagens(
       }
 
       const destSubdir = path.join(outputDir, blade, region)
-      if (!dryRun && !fs.existsSync(destSubdir)) {
-        fs.mkdirSync(destSubdir, { recursive: true })
-      }
+      fs.mkdirSync(destSubdir, { recursive: true })
 
       let cleanName = path.basename(original)
       if (mode === "P") {
         const order = idx + 1
-        const zFmt = String(Math.floor(location))
-        const mmFmt = String(pixelMm).replace('.', '_')
+        const zFmt = formatLocationForName(row['Location'])
+        const mmFmt = formatMmPx(row['Pixel MM'])
         cleanName = `${blade}_${zFmt}_${order}_${mmFmt}.jpg`
       }
 
@@ -2428,21 +2521,14 @@ export async function organizarImagens(
       sendLog(`[DRY-RUN] ${copied}/${rows.length} imagens seriam copiadas · ${missingFiles.length} não encontradas`, "warning")
       dryRunSamples.forEach(s => sendLog(s, "info"))
       if (copied > 5) sendLog(`  ... e mais ${copied - 5} operação(ões).`, "info")
-    } else {
+    } else if (missingFiles.length === 0) {
       sendLog(`${copied}/${rows.length} imagens organizadas com sucesso`, "success")
       sendLog(`Output: ${outputDir}`, "info")
-      if (missingFiles.length > 0) {
-        const reportPath = path.join(outputDir, "arquivos_nao_encontrados.txt")
-        const reportLines = [
-          "Arthwind Suite — arquivos não encontrados",
-          `Data: ${new Date().toISOString()}`,
-          `Total: ${missingFiles.length} arquivo(s)`,
-          "--------------------------------------------------",
-          ...missingFiles
-        ]
-        fs.writeFileSync(reportPath, reportLines.join('\n'), 'utf-8')
-        sendLog(`Lista de ausentes salva em OUTPUT/arquivos_nao_encontrados.txt`, "warning")
-      }
+    } else {
+      sendLog(`${copied}/${rows.length} imagens organizadas · ${missingFiles.length} não encontradas`, "warning")
+      sendLog(`Output: ${outputDir}`, "info")
+      const reportName = _writeMissingFile(outputDir, missingFiles, "Organizar Imagens S&R")
+      sendLog(`Lista de ausentes salva em OUTPUT/${reportName}`, "warning")
     }
 
     return { success: true }
@@ -2473,7 +2559,7 @@ export async function processarJson(jsonPath: string, webContents?: any): Promis
         const originalName = String(item.image_metadata?.original_file_name || '').toUpperCase()
         let foundRegion: string | null = null
         for (const r of validRegions) {
-          if (originalName.includes(`_${r}_`) || originalName.includes(`-${r}-`) || originalName.startsWith(`${r}_`)) {
+          if (originalName.includes(`_${r}_`) || originalName.includes(`-${r}-`) || originalName.includes(` ${r} `) || originalName.startsWith(`${r}_`)) {
             foundRegion = r
             break
           }
@@ -2806,7 +2892,13 @@ export async function organizarFotosJson(jsonPath: string, sourceFolder: string,
     }
 
     sendLog("Mapeando fotos da pasta de origem...", "info")
-    const imageCache = _buildImageCache(sourceFolder)
+    // Cache dedicado deste módulo (chave por nome em minúsculas, sem normalização extra,
+    // último arquivo encontrado vence em caso de colisão) — igual ao organizar_fotos_api
+    // do Python, que é mais simples que o _build_image_cache usado nos outros módulos.
+    const imageCache: Record<string, string> = {}
+    for (const filePath of _listImagesFlat(sourceFolder)) {
+      imageCache[path.basename(filePath).toLowerCase()] = filePath
+    }
     const rootFolder = path.dirname(jsonPath)
 
     let copied = 0
@@ -2823,25 +2915,32 @@ export async function organizarFotosJson(jsonPath: string, sourceFolder: string,
 
       if (!originalName || !targetPath) return
 
-      const src = imageCache[_normalizeFilename(originalName)]
+      const src = imageCache[String(originalName).toLowerCase()]
       if (!src) {
         missing.push(originalName)
         return
       }
 
+      // image_file_path é a pasta que contém a foto (não inclui o nome do arquivo) —
+      // usamos os 3 últimos segmentos dessa pasta como estrutura de destino, igual ao Python.
       const parts = targetPath.split(/[\\/]/).filter(Boolean)
-      const dirParts = parts.slice(-3, -1) // pastas antes do arquivo, ex: ['A', 'LE']
+      const dirParts = parts.slice(-3)
       const destDir = path.join(rootFolder, ...dirParts)
-      const destPath = path.join(destDir, path.basename(originalName))
+      const destPath = path.join(destDir, originalName)
 
       fs.mkdirSync(destDir, { recursive: true })
       fs.copyFileSync(src, destPath)
       copied++
     })
 
-    sendLog(`${copied}/${windblades.length} fotos organizadas com sucesso`, "success")
-    if (missing.length > 0) {
-      sendLog(`⚠ ${missing.length} fotos não encontradas.`, "warning")
+    if (missing.length === 0) {
+      sendLog(`${copied}/${windblades.length} fotos organizadas com sucesso`, "success")
+      sendLog(`Output: ${rootFolder}`, "info")
+    } else {
+      sendLog(`${copied}/${windblades.length} fotos organizadas · ${missing.length} não encontradas`, "warning")
+      sendLog(`Output: ${rootFolder}`, "info")
+      const reportName = _writeMissingFile(rootFolder, missing, "Organizar Fotos via JSON")
+      sendLog(`Lista de ausentes salva em ${reportName}`, "warning")
     }
 
     return { success: true }
@@ -2858,11 +2957,15 @@ export async function converterCsv(csvPath: string, gerarXlsx: boolean, webConte
 
   try {
     sendLog("Lendo CSV...", "info")
-    const csvContent = fs.readFileSync(csvPath, 'utf-8')
+    const csvContent = fs.readFileSync(csvPath, 'utf-8').replace(/^\uFEFF/, '')
     let delimiter = ';'
-    if (!csvContent.includes(';')) delimiter = ','
+    let lines = csvContent.split(/\r?\n/).map(l => parseCsvLine(l, delimiter))
+    if (lines[0].length === 1 && lines[0][0].includes(',')) {
+      delimiter = ','
+      lines = csvContent.split(/\r?\n/).map(l => parseCsvLine(l, delimiter))
+      sendLog("Delimitador ',' detectado no CSV. Lendo corretamente e convertendo...", "info")
+    }
 
-    const lines = csvContent.split(/\r?\n/).map(l => l.split(delimiter))
     const headers = lines[0].map(h => h.trim().replace(/^"|"$/g, ''))
     const rows = lines.slice(1).filter(l => l.length >= headers.length).map(l => {
       const obj: any = {}
@@ -2877,7 +2980,7 @@ export async function converterCsv(csvPath: string, gerarXlsx: boolean, webConte
     rows.forEach(r => {
       outLines.push(headers.map(h => `"${String(r[h] || '').replace(/"/g, '""')}"`).join(','))
     })
-    fs.writeFileSync(outCsv, outLines.join('\n'), 'utf-8')
+    fs.writeFileSync(outCsv, '\uFEFF' + outLines.join('\n'), 'utf-8')
     sendLog(`✔ CSV convertido: ${path.basename(outCsv)}`, "success")
 
     if (gerarXlsx) {
@@ -2902,8 +3005,7 @@ export async function extrairGpsZ(pasta: string, raizNome: string, webContents?:
 
   try {
     sendLog("Lendo altitudes de GPS das fotos...", "info")
-    const cache = _buildImageCache(pasta)
-    const filePaths = Object.values(cache)
+    const filePaths = _listImagesFlat(pasta).sort((a, b) => path.basename(a).localeCompare(path.basename(b)))
     const altitudes: Record<string, number> = {}
 
     for (let i = 0; i < filePaths.length; i++) {
@@ -2924,6 +3026,7 @@ export async function extrairGpsZ(pasta: string, raizNome: string, webContents?:
     sendLog(`Raiz (Z=0): ${raizNome} (${altitudeRaiz.toFixed(3)} m)`, "info")
 
     const resultados = Object.entries(altitudes)
+      .sort((a, b) => a[1] - b[1])
       .map(([nome, alt]) => {
         const zRel = (alt - altitudeRaiz) * 1000
         return {
@@ -2932,7 +3035,6 @@ export async function extrairGpsZ(pasta: string, raizNome: string, webContents?:
           z_relativo_mm: parseFloat(zRel.toFixed(1))
         }
       })
-      .sort((a, b) => a.altitude_gps_m - b.altitude_gps_m)
 
     const outCsv = path.join(pasta, "gps_z_relativo.csv")
     const headers = ['nome', 'altitude_gps_m', 'z_relativo_mm']
@@ -2961,7 +3063,7 @@ export async function corrigirZ0(csvPath: string, fotosDir: string, raizNome: st
     let delimiter = ';'
     if (!csvContent.includes(';')) delimiter = ','
 
-    const lines = csvContent.split(/\r?\n/).map(l => l.split(delimiter))
+    const lines = csvContent.split(/\r?\n/).map(l => parseCsvLine(l, delimiter))
     const headers = lines[0].map(h => h.trim().replace(/^"|"$/g, ''))
     const rows = lines.slice(1).filter(l => l.length >= headers.length).map(l => {
       const obj: any = {}
@@ -3005,7 +3107,11 @@ export async function corrigirZ0(csvPath: string, fotosDir: string, raizNome: st
             const newLoc = Math.round((alt - baseAlt) * 1000)
             row['Location'] = String(newLoc)
             mudancas++
+          } else {
+            sendLog(`⚠ Foto sem GPS ignorada: ${name}`, "warning")
           }
+        } else {
+          sendLog(`⚠ Foto não encontrada ignorada: ${name}`, "warning")
         }
       }
     }
@@ -3016,7 +3122,7 @@ export async function corrigirZ0(csvPath: string, fotosDir: string, raizNome: st
       rows.forEach(r => {
         outLines.push(headers.map(h => `"${String(r[h] || '').replace(/"/g, '""')}"`).join(';'))
       })
-      fs.writeFileSync(outCsv, outLines.join('\n'), 'utf-8')
+      fs.writeFileSync(outCsv, '\uFEFF' + outLines.join('\n'), 'utf-8')
       sendLog(`✔ Correção de Z aplicada! ${mudancas} itens zerados corrigidos.`, "success")
       sendLog(`Salvo como: ${path.basename(outCsv)}`, "success")
     } else {
@@ -3044,23 +3150,22 @@ export async function recuperarFotosPerdidas(jsonPath: string, fotosDir: string,
     }
 
     sendLog("Montando cache de fotos do SD Card...", "info")
-    const imageCache = _buildImageCache(fotosDir)
+    const imageCache = _buildImageCache(fotosDir, sendLog)
 
-    // Group by blade & region
-    const groups: Record<string, any[]> = {}
+    // Group by blade & region (chave interna arbitrária — a região real fica guardada no
+    // próprio grupo, evitando reconstrução via split('_') que quebraria se blade_position
+    // ou region contivessem underscore)
+    const groups: Record<string, { region: string; items: any[] }> = {}
     windblades.forEach((wb: any) => {
-      const key = `${wb.blade_position}_${wb.region}`
-      if (!groups[key]) groups[key] = []
-      groups[key].push(wb)
+      const key = `${wb.blade_position} ${wb.region}`
+      if (!groups[key]) groups[key] = { region: wb.region, items: [] }
+      groups[key].items.push(wb)
     })
 
     const outDir = path.join(path.dirname(jsonPath), "Fotos_Recuperadas")
     const resultados: any[] = []
 
-    for (const [key, photos] of Object.entries(groups)) {
-      const parts = key.split('_')
-      const region = parts[1]
-
+    for (const { region, items: photos } of Object.values(groups)) {
       const getSeq = (p: any): number => {
         const name = p.image_metadata?.original_file_name || ''
         const m = name.match(/_(\d{4})_V/)
@@ -3150,7 +3255,12 @@ export async function recuperarFotosPerdidas(jsonPath: string, fotosDir: string,
               const locBefore = parseFloat(before.image_metadata?.location || 0)
               location = locBefore + ((altEncontrada - altBefore) * 1000)
               locType = "GPS Precisão"
-            } else {
+            }
+
+            // Fallback pra média entre vizinhos sempre que o cálculo por GPS não rendeu
+            // (falta de altitude em algum dos dois, ou o resultado deu exatamente 0) —
+            // os dois blocos rodam em sequência, igual ao Python, não é um if/else.
+            if (location === 0) {
               const loc1 = parseFloat(before.image_metadata?.location || 0)
               const loc2 = parseFloat(after.image_metadata?.location || 0)
               location = (loc1 + loc2) / 2
@@ -3185,11 +3295,15 @@ export async function recuperarFotosPerdidas(jsonPath: string, fotosDir: string,
     if (resultados.length > 0) {
       const csvPath = path.join(outDir, "relatorio_fotos_recuperadas.csv")
       const headers = ['region', 'location', 'pixel_size', 'turbine_name', 'blade_sn', 'image']
+      const csvEscape = (v: any) => {
+        const s = String(v ?? '')
+        return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+      }
       const csvLines = [headers.join(';')]
       resultados.forEach(r => {
-        csvLines.push(headers.map(h => r[h]).join(';'))
+        csvLines.push(headers.map(h => csvEscape(r[h])).join(';'))
       })
-      fs.writeFileSync(csvPath, csvLines.join('\n'), 'utf-8')
+      fs.writeFileSync(csvPath, '\uFEFF' + csvLines.join('\n'), 'utf-8')
       sendLog(`Operação concluída. ${resultados.length} fotos salvas na pasta: Fotos_Recuperadas`, "success")
     } else {
       sendLog("Nenhuma foto faltando foi detectada ou recuperada.", "warning")
@@ -3208,9 +3322,8 @@ export async function carregarFotosReconstruir(pasta: string, webContents?: any)
   }
 
   try {
-    const cache = _buildImageCache(pasta)
-    const filePaths = Object.values(cache).sort((a, b) => path.basename(a).localeCompare(path.basename(b)))
-    
+    const filePaths = _listImagesFlat(pasta).sort((a, b) => path.basename(a).localeCompare(path.basename(b)))
+
     if (filePaths.length === 0) {
       sendLog("Nenhuma foto .JPG/.JPEG encontrada na pasta.", "error")
       return []
@@ -3257,8 +3370,8 @@ export async function reconstruirCsv(
   }
 
   try {
-    const cache = _buildImageCache(pasta)
-    const photoList = Object.values(cache)
+    const flatFiles = _listImagesFlat(pasta)
+    const photoList = flatFiles
       .map(f => path.basename(f))
       .sort((a, b) => a.localeCompare(b))
 
@@ -3267,7 +3380,7 @@ export async function reconstruirCsv(
     }
 
     const altitudes: Record<string, number> = {}
-    for (const f of Object.values(cache)) {
+    for (const f of flatFiles) {
       const alt = await extractGpsAltitude(f)
       if (alt !== null) altitudes[path.basename(f)] = alt
     }
@@ -3307,6 +3420,13 @@ export async function reconstruirCsv(
         endIdx = tmp
       }
 
+      const overlapCount = [...Array(endIdx - startIdx + 1).keys()]
+        .map(i => startIdx + i)
+        .filter(idx => usedIndices.has(idx)).length
+      if (overlapCount > 0) {
+        sendLog(`⚠ Lado ${side}: ${overlapCount} foto(s) já atribuídas a outro lado — sobreposição removida.`, "warning")
+      }
+
       const sidePhotos = photoList
         .slice(startIdx, endIdx + 1)
         .filter((_, idx) => !usedIndices.has(startIdx + idx))
@@ -3327,7 +3447,7 @@ export async function reconstruirCsv(
           'Blade SN': bladeSn,
           'Side': side,
           'Original Image': nome,
-          'Location': Math.round(photoZ[nome] || 0),
+          'Location': roundHalfToEven(photoZ[nome] || 0),
           'Pixel MM': pixelMm
         })
       })
@@ -3345,7 +3465,7 @@ export async function reconstruirCsv(
     rows.forEach(r => {
       csvLines.push(`${r['Blade SN']};${r['Side']};${r['Original Image']};${r['Location']};${r['Pixel MM']}`)
     })
-    fs.writeFileSync(outCsv, csvLines.join('\n'), 'utf-8')
+    fs.writeFileSync(outCsv, '\uFEFF' + csvLines.join('\n'), 'utf-8')
     sendLog(`✔ CSV reconstruído: ${path.basename(outCsv)}`, "success")
 
     return { success: true }
@@ -3408,8 +3528,8 @@ export async function reconstruirCsvMulti(
       }
 
       sendLog(`── Pá ${bladeLabel} ── ${path.basename(pasta)}`, "info")
-      const cache = _buildImageCache(pasta)
-      const photoList = Object.values(cache)
+      const flatFiles = _listImagesFlat(pasta)
+      const photoList = flatFiles
         .map(f => path.basename(f))
         .sort((a, b) => a.localeCompare(b))
 
@@ -3419,7 +3539,7 @@ export async function reconstruirCsvMulti(
       }
 
       const altitudes: Record<string, number> = {}
-      for (const f of Object.values(cache)) {
+      for (const f of flatFiles) {
         const alt = await extractGpsAltitude(f)
         if (alt !== null) altitudes[path.basename(f)] = alt
       }
@@ -3459,6 +3579,13 @@ export async function reconstruirCsvMulti(
           ei = tmp
         }
 
+        const overlapCount = [...Array(ei - si + 1).keys()]
+          .map(i => si + i)
+          .filter(idx => usedIdx.has(idx)).length
+        if (overlapCount > 0) {
+          sendLog(`⚠ Pá ${bladeLabel} lado ${side}: ${overlapCount} foto(s) já atribuídas a outro lado — sobreposição removida.`, "warning")
+        }
+
         let sidePhotos = photoList
           .slice(si, ei + 1)
           .filter((_, idx) => !usedIdx.has(si + idx))
@@ -3475,7 +3602,7 @@ export async function reconstruirCsvMulti(
 
         sidePhotos.forEach(nome => {
           const pixelMm = parseFloat((pixelMmAvg + (Math.random() * 0.03 - 0.015)).toFixed(5))
-          const z = Math.round(photoZ[nome] || 0)
+          const z = roundHalfToEven(photoZ[nome] || 0)
           rowsM1.push({ 'Blade SN': bladeSn, 'Side': side, 'Original Image': nome, 'Location': z, 'Pixel MM': pixelMm })
           
           if (genUploaderCsv) {
@@ -3503,7 +3630,7 @@ export async function reconstruirCsvMulti(
       rowsM1.forEach(r => {
         m1Lines.push(`${r['Blade SN']};${r['Side']};${r['Original Image']};${r['Location']};${r['Pixel MM']}`)
       })
-      fs.writeFileSync(outM1, m1Lines.join('\n'), 'utf-8')
+      fs.writeFileSync(outM1, '\uFEFF' + m1Lines.join('\n'), 'utf-8')
       sendLog(`✔ Pá ${bladeLabel}: ${path.basename(outM1)} (${rowsM1.length} linhas)`, "success")
 
       if (genUploaderCsv && rowsUp.length > 0) {
@@ -3604,16 +3731,15 @@ export async function reconstruirCsvMulti(
       }
 
       const parts = [workorder, turbine].filter(p => !!p)
-      const suffix = jsonRefPath ? "matched" : "reconstruido"
+      const hasRef = Object.keys(refByPosRgn).length > 0
+      const suffix = hasRef ? "matched" : "reconstruido"
       let fname = parts.length > 0 ? `photo_data_${suffix}_${parts.join('_')}.json` : `photo_data_${suffix}.json`
       fname = fname.replace(/[\/*?:"<>|]/g, '')
 
-      const jsonDoc = {
-        ...refDataTop,
-        workorder,
-        turbine,
-        windblades: allWindblades
-      }
+      const jsonDoc: any = { ...refDataTop }
+      if (workorder) jsonDoc.workorder = workorder
+      if (turbine) jsonDoc.turbine = turbine
+      jsonDoc.windblades = allWindblades
 
       const outJson = path.join(jsonOutDir, fname)
       fs.writeFileSync(outJson, JSON.stringify(jsonDoc, null, 2), 'utf-8')
@@ -3664,7 +3790,7 @@ export async function padronizarGoPro(fotosDir: string, dryRun: boolean, webCont
 
   try {
     sendLog("Escaneando fotos GoPro na pasta...", "info")
-    const cache = _buildImageCache(fotosDir)
+    const flatFiles = _listImagesFlat(fotosDir)
     const entries: any[] = []
     const skipped: string[] = []
     let selectSideFixed = 0
@@ -3672,7 +3798,7 @@ export async function padronizarGoPro(fotosDir: string, dryRun: boolean, webCont
     const filenameRe = /^.+?--(?<blade>.+?)--(?<region>[A-Za-z]+)_(?<location>\d+)/i
     const fallbackRe = /^.+?--(?<blade>.+?)--[^_]+_(?<location>\d+)/i
 
-    for (const fPath of Object.values(cache)) {
+    for (const fPath of flatFiles) {
       const stem = path.basename(fPath, path.extname(fPath))
       const m = stem.match(filenameRe)
       if (m && m.groups) {
@@ -3681,7 +3807,7 @@ export async function padronizarGoPro(fotosDir: string, dryRun: boolean, webCont
         const fall = stem.match(fallbackRe)
         if (fall && fall.groups) {
           const parentFolder = path.basename(path.dirname(fPath)).toUpperCase()
-          if (parentFolder === 'LE' || parentFolder === 'TE' || parentFolder === 'CE') {
+          if (parentFolder in PACKER_REGION_MAP) {
             entries.push({ blade: fall.groups.blade, region: parentFolder, location: parseInt(fall.groups.location, 10), filePath: fPath })
             selectSideFixed++
           } else {
@@ -3704,17 +3830,19 @@ export async function padronizarGoPro(fotosDir: string, dryRun: boolean, webCont
       sendLog(`${skipped.length} arquivo(s) sem padrão reconhecido ignorados`, "warning")
     }
 
-    // Group by blade & region
-    const groups: Record<string, any[]> = {}
+    // Group by blade & region (chave interna arbitrária — blade/region reais ficam
+    // guardados no próprio grupo, evitando reconstrução via split('_') que quebraria
+    // se o blade SN contivesse underscore)
+    const groups: Record<string, { blade: string; region: string; items: any[] }> = {}
     entries.forEach(e => {
-      const key = `${e.blade}_${e.region}`
-      if (!groups[key]) groups[key] = []
-      groups[key].push(e)
+      const key = `${e.blade} ${e.region}`
+      if (!groups[key]) groups[key] = { blade: e.blade, region: e.region, items: [] }
+      groups[key].items.push(e)
     })
 
     // Sort within each group
-    Object.values(groups).forEach(list => {
-      list.sort((a, b) => a.location - b.location || path.basename(a.filePath).localeCompare(path.basename(b.filePath)))
+    Object.values(groups).forEach(g => {
+      g.items.sort((a, b) => a.location - b.location || path.basename(a.filePath).localeCompare(path.basename(b.filePath)))
     })
 
     const outputDir = path.join(path.dirname(fotosDir), "OUTPUT")
@@ -3723,12 +3851,9 @@ export async function padronizarGoPro(fotosDir: string, dryRun: boolean, webCont
     }
 
     let copied = 0
-    Object.entries(groups).forEach(([key, items]) => {
-      const parts = key.split('_')
-      const blade = parts[0]
-      const region = parts[1]
+    Object.values(groups).forEach(({ blade, region, items }) => {
       const destSubdir = path.join(outputDir, blade, region)
-      
+
       if (!dryRun && !fs.existsSync(destSubdir)) {
         fs.mkdirSync(destSubdir, { recursive: true })
       }
@@ -4021,12 +4146,15 @@ export async function vincularArthnexCsv(csvPath: string, fotosDir: string, webC
     sendLog(`Encontradas ${fotos.length} fotos Arthnex.`, "info")
 
     sendLog("Lendo CSV...", "info")
-    const csvContent = fs.readFileSync(csvPath, 'utf-8')
+    const csvContent = fs.readFileSync(csvPath, 'utf-8').replace(/^\uFEFF/, '')
     let delimiter = ';'
-    if (!csvContent.includes(';')) delimiter = ','
-
-    const lines = csvContent.split(/\r?\n/).map(l => l.split(delimiter))
-    const headers = lines[0].map(h => h.trim().replace(/^"|"$/g, ''))
+    let lines = csvContent.split(/\r?\n/).map(l => parseCsvLine(l, delimiter))
+    let headers = lines[0].map(h => h.trim().replace(/^"|"$/g, ''))
+    if (!headers.includes('Blade SN')) {
+      delimiter = ','
+      lines = csvContent.split(/\r?\n/).map(l => parseCsvLine(l, delimiter))
+      headers = lines[0].map(h => h.trim().replace(/^"|"$/g, ''))
+    }
     const rows = lines.slice(1).filter(l => l.length >= headers.length).map(l => {
       const obj: any = {}
       headers.forEach((h, idx) => {
@@ -4035,19 +4163,17 @@ export async function vincularArthnexCsv(csvPath: string, fotosDir: string, webC
       return obj
     })
 
-    const required = ['Blade SN', 'Location', 'Side', 'Original Image']
-    const missing = required.filter(r => !headers.includes(r))
-    if (missing.length > 0) {
-      return { success: false, error: `Colunas ausentes no CSV: ${missing.join(', ')}` }
-    }
-
-    const linhasCsv = rows.map(r => ({
-      blade_sn: r['Blade SN'].trim(),
-      location: parseFloat(r['Location']) || 0,
-      side: r['Side'].trim(),
-      original_image: r['Original Image'].trim(),
-      row_data: r
-    }))
+    // Tolerante a colunas ausentes (como o csv.DictReader do Python) — só pula a linha
+    // se blade_sn ou original_image vierem vazios, em vez de rejeitar o CSV inteiro.
+    const linhasCsv = rows
+      .map(r => ({
+        blade_sn: String(r['Blade SN'] || '').trim(),
+        location: parseFloat(r['Location']) || 0,
+        side: String(r['Side'] || '').trim(),
+        original_image: String(r['Original Image'] || '').trim(),
+        row_data: r
+      }))
+      .filter(l => l.blade_sn && l.original_image)
 
     sendLog(`Lidas ${linhasCsv.length} linhas do CSV.`, "info")
 
@@ -4121,20 +4247,21 @@ export async function vincularArthnexCsv(csvPath: string, fotosDir: string, webC
       }
     })
 
-    // Check orphan photos
-    Object.entries(fotosGrupos).forEach(([key, fList]) => {
-      const parts = key.split('_')
-      const blade = parts[0]
-      const side = parts[1]
-      const loc = parts[2]
+    // Check orphan photos — usa blade_sn/side/location originais de cada foto (não
+    // reconstrói via split('_') da chave, que quebraria se o blade_sn tivesse underscore)
+    const orphanGroupsSeen = new Set<string>()
+    fotos.forEach(f => {
+      const key = `${f.blade_sn}_${f.side}_${f.location}`
+      if (orphanGroupsSeen.has(key)) return
+      orphanGroupsSeen.add(key)
 
       let invertedSide = ''
-      if (side === 'SS') invertedSide = 'PS'
-      else if (side === 'PS') invertedSide = 'SS'
-      const invertedKey = `${blade}_${invertedSide}_${loc}`
+      if (f.side === 'SS') invertedSide = 'PS'
+      else if (f.side === 'PS') invertedSide = 'SS'
+      const invertedKey = `${f.blade_sn}_${invertedSide}_${f.location}`
 
       if (!csvGrupos[key] && !csvGrupos[invertedKey]) {
-        orfaoFoto += fList.length
+        orfaoFoto += fotosGrupos[key].length
       }
     })
 
@@ -4187,7 +4314,7 @@ export async function vincularArthnexCsv(csvPath: string, fotosDir: string, webC
           linhasOrfasCsv.forEach(l => {
             csvLines.push(cabecalhos.map(h => l.row_data[h]).join(';'))
           })
-          fs.writeFileSync(reportPath, csvLines.join('\n'), 'utf-8')
+          fs.writeFileSync(reportPath, '\uFEFF' + csvLines.join('\n'), 'utf-8')
           sendLog(`  → Foi gerado um relatório detalhado das faltas em: ${path.basename(reportPath)}`, "warning")
         }
       } catch (err: any) {
@@ -4224,7 +4351,10 @@ export async function analisarBladeSplit(filePath: string, threshold: number, we
       sendLog("Analisando JSON para divisão de voo...", "info")
       const data = cryptoService.loadJson(filePath, [], true)
       const windblades = data.windblades || []
-      if (windblades.length === 0) return []
+      if (windblades.length === 0) {
+        sendLog("Nenhum windblade encontrado no JSON.", "error")
+        return []
+      }
 
       const grupos: Record<string, any[]> = {}
       windblades.forEach((item: any, idx: number) => {
@@ -4298,7 +4428,7 @@ export async function analisarBladeSplit(filePath: string, threshold: number, we
       let delimiter = ';'
       if (!csvContent.includes(';')) delimiter = ','
 
-      const lines = csvContent.split(/\r?\n/).map(l => l.split(delimiter))
+      const lines = csvContent.split(/\r?\n/).map(l => parseCsvLine(l, delimiter))
       const headers = lines[0].map(h => h.trim().replace(/^"|"$/g, ''))
       const rows = lines.slice(1).filter(l => l.length >= headers.length).map(l => {
         const obj: any = {}
@@ -4426,11 +4556,11 @@ export async function corrigirBladeSplit(filePath: string, correcoes: any[], web
             const meta = wbItem.image_metadata || {}
             let oldPath = meta.image_file_path || ''
             if (oldPath) {
-              const strFind = `${posOriginal}_${bladeSnAntigo}`
+              const strFind = escapeRegExp(`${posOriginal}_${bladeSnAntigo}`)
               const strRepl = `${novaPos}_${novoSn}`
               let newPath = oldPath.replace(new RegExp(strFind, 'g'), strRepl)
-              newPath = newPath.replace(new RegExp(`/${posOriginal}/`, 'g'), `/${novaPos}/`)
-              newPath = newPath.replace(new RegExp(`-${posOriginal}-`, 'g'), `-${novaPos}-`)
+              newPath = newPath.replace(new RegExp(`/${escapeRegExp(posOriginal)}/`, 'g'), `/${novaPos}/`)
+              newPath = newPath.replace(new RegExp(`-${escapeRegExp(posOriginal)}-`, 'g'), `-${novaPos}-`)
               meta.image_file_path = newPath
             }
             mudancas++
@@ -4451,7 +4581,7 @@ export async function corrigirBladeSplit(filePath: string, correcoes: any[], web
       let delimiter = ';'
       if (!csvContent.includes(';')) delimiter = ','
 
-      const lines = csvContent.split(/\r?\n/).map(l => l.split(delimiter))
+      const lines = csvContent.split(/\r?\n/).map(l => parseCsvLine(l, delimiter))
       const headers = lines[0].map(h => h.trim().replace(/^"|"$/g, ''))
       const rows = lines.slice(1).filter(l => l.length >= headers.length).map(l => {
         const obj: any = {}
@@ -4497,7 +4627,7 @@ export async function corrigirBladeSplit(filePath: string, correcoes: any[], web
             outLines.push(headers.map(h => `"${String(r[h] || '').replace(/"/g, '""')}"`).join(';'))
           })
           fs.writeFileSync(outPath, outLines.join('\n'), 'utf-8')
-          sendLog(`✔ CSV gerado para SN {novoSn}: ${path.basename(outPath)} (${dfGrupo.length} fotos)`, "success")
+          sendLog(`✔ CSV gerado para SN ${novoSn}: ${path.basename(outPath)} (${dfGrupo.length} fotos)`, "success")
           mudancas++
         }
       }
@@ -4592,7 +4722,7 @@ export async function jsonParaCsvOrganizar(jsonPath: string, webContents?: any):
       rows.forEach(r => {
         csvLines.push(`${r['Blade SN']};${r['Side']};${r['Original Image']};${r['Location']};${r['Pixel MM']}`)
       })
-      fs.writeFileSync(outPath, csvLines.join('\n'), 'utf-8')
+      fs.writeFileSync(outPath, '\uFEFF' + csvLines.join('\n'), 'utf-8')
       sendLog(`✔ ${bladeSn}: ${path.basename(outPath)} (${rows.length} linhas)`, "success")
       csvsGerados++
     }
@@ -4617,9 +4747,8 @@ export async function carregarFotosGps(pasta: string, webContents?: any): Promis
   }
 
   try {
-    const cache = _buildImageCache(pasta)
-    const filePaths = Object.values(cache).sort((a, b) => path.basename(a).localeCompare(path.basename(b)))
-    
+    const filePaths = _listImagesFlat(pasta).sort((a, b) => path.basename(a).localeCompare(path.basename(b)))
+
     if (filePaths.length === 0) {
       sendLog("Nenhuma foto .JPG/.JPEG encontrada na pasta.", "error")
       return []

@@ -137,11 +137,9 @@ function mergeHorizonBases(paths: string[]): any[] | null {
   return result
 }
 
-function mergeAtwSummaries(paths: string[]): any[] | null {
+function mergeAtwSummariesFromContents(contents: string[]): any[] | null {
   const dfs: any[] = []
-  for (const p of paths) {
-    if (!fs.existsSync(p)) continue
-    const content = fs.readFileSync(p, 'utf-8')
+  for (const content of contents) {
     const df = loadCsvRobust(content)
     if (df && df.length > 0) {
       dfs.push(...df)
@@ -161,6 +159,11 @@ function mergeAtwSummaries(paths: string[]): any[] | null {
   return result
 }
 
+function mergeAtwSummaries(paths: string[]): any[] | null {
+  const contents = paths.filter(p => fs.existsSync(p)).map(p => fs.readFileSync(p, 'utf-8'))
+  return mergeAtwSummariesFromContents(contents)
+}
+
 function deduplicateAtw(df: any[]): { df: any[]; n_duplicatas: number } {
   if (!df || df.length === 0) return { df: [], n_duplicatas: 0 }
   const seen = new Set<string>()
@@ -175,38 +178,17 @@ function deduplicateAtw(df: any[]): { df: any[]; n_duplicatas: number } {
   return { df: result, n_duplicatas: df.length - result.length }
 }
 
-function standardizeTurbineName(name: string): string {
-  if (!name) return ''
-  let s = String(name).trim().toLowerCase()
-  s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  
-  // Remove generic prefixes
-  s = s.replace(/^(aeros?|wtg|aerogerador|turbine|maquina)\b/g, '')
-  s = s.replace(/^aero\s+/g, '')
-  
-  // Insert spaces between letters and digits to split them properly
-  s = s.replace(/([a-z])([0-9])/g, '$1 $2')
-  s = s.replace(/([0-9])([a-z])/g, '$1 $2')
-  
-  // Replace non-alphanumeric (dashes, slashes, punctuation, spaces) with spaces
-  s = s.replace(/[^a-z0-9]/g, ' ')
-  
-  const parts = s.split(/\s+/).filter(Boolean).map(p => {
-    if (/^[0-9]+$/.test(p)) {
-      return p.replace(/^0+(\d)/, '$1')
-    }
-    return p
-  })
-  
-  return parts.join('')
-}
-
+// Normaliza nome de turbina para auto-match exato. Remove s\u00f3 separadores
+// (espa\u00e7o, h\u00edfen, underscore) \u2014 N\u00c3O remove zeros internos, pra evitar falso
+// positivo (ex: OIT01-02 \u2260 OIT10-02).
 function normalizar(s: string): string {
-  return standardizeTurbineName(s)
+  return String(s).toLowerCase().replace(/[-_\s]/g, '')
 }
 
+// Normaliza\u00e7\u00e3o profunda s\u00f3 pra scoring fuzzy (SequenceMatcher/suggestTurbineMatch):
+// remove separadores E zeros \u00e0 esquerda em cada sequ\u00eancia de d\u00edgitos.
 function normalizarFuzzy(s: string): string {
-  return standardizeTurbineName(s)
+  return String(s).toLowerCase().replace(/[-_\s]/g, '').replace(/0+(\d)/g, '$1')
 }
 
 function getLcsLength(s1: string, s2: string): number {
@@ -246,7 +228,7 @@ function suggestTurbineMatch(nomeHorizon: string, opcoesAtw: string[]): [string,
   return [melhorOpcao, melhorScore]
 }
 
-function parseDateToYyyyMmDd(raw: string): string {
+function parseDateToMmDdYyyy(raw: string): string {
   const val = String(raw).trim()
   if (!val || ['nan', 'nat', 'none', 'null'].includes(val.toLowerCase())) {
     return ''
@@ -256,7 +238,7 @@ function parseDateToYyyyMmDd(raw: string): string {
     const mm = String(parsed.getMonth() + 1).padStart(2, '0')
     const dd = String(parsed.getDate()).padStart(2, '0')
     const yyyy = parsed.getFullYear()
-    return `${yyyy}-${mm}-${dd}`
+    return `${mm}/${dd}/${yyyy}`
   }
   return ''
 }
@@ -781,7 +763,8 @@ export async function horizonValidarRequisitos(
       }
     }
 
-    const summaryContent = summaryPaths.length > 0 && fs.existsSync(summaryPaths[0]) ? fs.readFileSync(summaryPaths[0], 'utf-8') : ''
+    const summariesContents = (summaryPaths || []).filter(p => fs.existsSync(p)).map(p => fs.readFileSync(p, 'utf-8'))
+    const summaryContent = summariesContents[0] || ''
     const detailsContent = fs.existsSync(detailsPath) ? fs.readFileSync(detailsPath, 'utf-8') : ''
 
     const result = validateRequirements(
@@ -790,7 +773,8 @@ export async function horizonValidarRequisitos(
       damagesContents,
       turbinasRemovidas,
       vinculosConfirmados,
-      taskMap
+      taskMap,
+      summariesContents
     )
 
     return { success: true, is_valid: result.is_valid, errors: result.errors, warnings: result.warnings }
@@ -805,7 +789,8 @@ export function validateRequirements(
   damagesContents: [string, string][],
   turbinasRemovidas: string[] = [],
   vinculosConfirmados: Record<string, string> = {},
-  taskMap: Record<string, any> = {}
+  taskMap: Record<string, any> = {},
+  summariesContents?: string[]
 ): RequirementsResult {
   const erros: string[] = []
   const avisos: string[] = []
@@ -818,7 +803,9 @@ export function validateRequirements(
   ].filter(x => !removidasSet.has(x)))
 
   // ── Inconsistências de Arquivos (Verificações Críticas de Integridade) ──
-  const dfS = loadCsvRobust(contentSummary)
+  const dfS = summariesContents && summariesContents.length > 0
+    ? mergeAtwSummariesFromContents(summariesContents)
+    : loadCsvRobust(contentSummary)
   const dfD = loadCsvRobust(contentDetails)
 
   if (dfS && dfS.length > 0 && dfD && dfD.length > 0) {
@@ -1134,8 +1121,8 @@ export async function horizonGerarPacote(
       dNorm: Record<string, string>
     ): string => {
       const resolved = vinculos[tHor] || tHor
-      if (dExact[resolved] !== undefined && dExact[resolved] !== '') return dExact[resolved]
-      if (dExact[tHor] !== undefined && dExact[tHor] !== '') return dExact[tHor]
+      if (dExact[resolved] !== undefined) return dExact[resolved]
+      if (dExact[tHor] !== undefined) return dExact[tHor]
       return dNorm[normalizar(tHor)] || ''
     }
 
@@ -1146,7 +1133,7 @@ export async function horizonGerarPacote(
       }
       if (hasDateCol) {
         const val = lookupVal(t, atwDate, atwNormDate)
-        row['Inspection Date'] = parseDateToYyyyMmDd(val)
+        row['Inspection Date'] = parseDateToMmDdYyyy(val)
       }
       if (hasTypeCol) {
         row['Inspection Type'] = lookupVal(t, atwType, atwNormType)

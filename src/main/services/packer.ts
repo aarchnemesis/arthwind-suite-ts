@@ -44,12 +44,13 @@ export function packerDetectInfo(filePath: string, basePath: string): { region: 
     }
   }
 
-  // 1. Padrão no nome do arquivo: --REGION_LOCATION_
-  const filenameMatch = stem.match(/--([A-Z]+)_(\d+)/)
-  if (filenameMatch) {
-    const region = filenameMatch[1]
+  // 1. Padrão no nome do arquivo: --REGION_LOCATION_ — itera todas as ocorrências (não só
+  // a primeira) e usa a primeira cuja região seja válida, evitando falso-positivo quando o
+  // blade SN em si contém um trecho "letras_dígitos" antes do token de região de verdade.
+  for (const m of stem.matchAll(/--([A-Z]+)_(\d+)/g)) {
+    const region = m[1]
     if (PACKER_REGION_MAP[region]) {
-      return { region, location: parseInt(filenameMatch[2], 10) }
+      return { region, location: parseInt(m[2], 10) }
     }
   }
 
@@ -182,10 +183,17 @@ export function packerGenerateCsv(
   const orderIdx = new Map<string, number>()
   PACKER_REGION_ORDER.forEach((r, idx) => orderIdx.set(r, idx))
 
-  // Ordenar arquivos por região (Ordem do Packer), depois localização Z, depois nome
+  // Ordenar arquivos por região (Ordem do Packer), depois localização Z, depois nome.
+  // Tenta a região crua primeiro — LE/TE/CE/BOX/VISUAL (as 5 regiões nativas do Python)
+  // já batem direto em PACKER_REGION_ORDER, então BOX e VISUAL formam seus próprios grupos
+  // de ordenação, distintos de TE/CE, igual ao Python original. Só cai no mapeamento pra
+  // variantes extras (Arthfilm 360, ex: CE_3H) que não existem no Python.
+  const regionOrder = (region: string): number =>
+    orderIdx.get(region) ?? orderIdx.get(PACKER_REGION_MAP[region] || '') ?? 99
+
   files.sort((a, b) => {
-    const regA = orderIdx.get(PACKER_REGION_MAP[a.region] || a.region) ?? 99
-    const regB = orderIdx.get(PACKER_REGION_MAP[b.region] || b.region) ?? 99
+    const regA = regionOrder(a.region)
+    const regB = regionOrder(b.region)
     if (regA !== regB) return regA - regB
 
     const locA = a.location !== null ? a.location : 10 ** 9

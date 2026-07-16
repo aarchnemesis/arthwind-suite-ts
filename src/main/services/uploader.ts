@@ -113,7 +113,7 @@ function lerCabecalhoCsv(csvPath: string): string[] {
   const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0)
   fs.closeSync(fd)
   const primeiraLinha = buffer.subarray(0, bytesRead).toString('utf-8').split(/\r?\n/)[0]
-  return primeiraLinha.replace(/^﻿/, '').split(',').map(h => h.trim().toLowerCase())
+  return primeiraLinha.replace(/^\uFEFF/, '').split(',').map(h => h.trim().toLowerCase())
 }
 
 function ehCsvDeUpload(csvPath: string): boolean {
