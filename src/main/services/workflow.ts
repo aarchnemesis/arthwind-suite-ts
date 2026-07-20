@@ -2904,7 +2904,16 @@ export async function organizarFotosJson(jsonPath: string, sourceFolder: string,
     let copied = 0
     const missing: string[] = []
 
-    windblades.forEach((item: any, idx: number) => {
+    // Assíncrono de propósito — antes usava fs.copyFileSync num forEach síncrono, o que
+    // travava o processo principal do Electron INTEIRO (não só essa função) enquanto
+    // copiava. Com poucos arquivos pequenos isso passava despercebido, mas com muitos
+    // arquivos grandes (ex.: 146 vídeos) travava o app por tempo suficiente pra nem o
+    // próprio timeout de segurança do renderer conseguir avisar direito (ele dispara, mas
+    // a cópia continua rodando escondida, já que quem trava é o processo principal, não o
+    // timer do lado da tela). Usar as versões async + await cede o controle do event loop
+    // entre cada arquivo, mantendo o app responsivo durante toda a operação.
+    for (let idx = 0; idx < windblades.length; idx++) {
+      const item = windblades[idx]
       if (idx % 10 === 0 || idx === windblades.length - 1) {
         if (webContents) webContents.send('arthprogress', { current: idx + 1, total: windblades.length })
       }
@@ -2913,12 +2922,12 @@ export async function organizarFotosJson(jsonPath: string, sourceFolder: string,
       const originalName = meta.original_file_name
       const targetPath = meta.image_file_path
 
-      if (!originalName || !targetPath) return
+      if (!originalName || !targetPath) continue
 
       const src = imageCache[String(originalName).toLowerCase()]
       if (!src) {
         missing.push(originalName)
-        return
+        continue
       }
 
       // image_file_path é a pasta que contém a foto (não inclui o nome do arquivo) —
@@ -2928,10 +2937,10 @@ export async function organizarFotosJson(jsonPath: string, sourceFolder: string,
       const destDir = path.join(rootFolder, ...dirParts)
       const destPath = path.join(destDir, originalName)
 
-      fs.mkdirSync(destDir, { recursive: true })
-      fs.copyFileSync(src, destPath)
+      await fs.promises.mkdir(destDir, { recursive: true })
+      await fs.promises.copyFile(src, destPath)
       copied++
-    })
+    }
 
     if (missing.length === 0) {
       sendLog(`${copied}/${windblades.length} fotos organizadas com sucesso`, "success")

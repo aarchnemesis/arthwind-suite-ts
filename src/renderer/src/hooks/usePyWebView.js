@@ -63,8 +63,24 @@ export default function usePyWebView() {
       setRan(false);
       setProgress(-1);
 
+      // Watchdog de 5 minutos SEM atividade (não um prazo fixo pro processo inteiro) —
+      // antes disparava mesmo com o processo vivo e progredindo normalmente, só que
+      // demorando mais que 5 minutos no total (ex.: organizar 146 vídeos). Cada log ou
+      // evento de progresso reseta o relógio; só dispara se realmente ficar 5 minutos
+      // sem nenhum sinal de vida.
+      const armSafetyTimer = () => {
+        if (safetyTimerRef.current) clearTimeout(safetyTimerRef.current);
+        safetyTimerRef.current = setTimeout(() => {
+          setRunning(false);
+          setProgress(0);
+          addLog({ type: "error", text: "Timeout: processo sem responder há 5 minutos." });
+          cleanup();
+        }, 300000);
+      };
+
       const onLog = (e) => {
         addLog(e.detail);
+        armSafetyTimer();
         // Detecta caminho de output nas mensagens "Output: C:\..."
         const outMatch = (e.detail.text || "").match(/^Output:\s*(.+)$/i);
         if (outMatch) setLastOutput(outMatch[1].trim());
@@ -73,6 +89,7 @@ export default function usePyWebView() {
       const onProgress = (e) => {
         const { current, total } = e.detail;
         if (total > 0) setProgress(Math.round((current / total) * 100));
+        armSafetyTimer();
       };
 
       const cleanup = () => {
@@ -82,12 +99,7 @@ export default function usePyWebView() {
         window.removeEventListener("arthprogress", onProgress);
       };
 
-      safetyTimerRef.current = setTimeout(() => {
-        setRunning(false);
-        setProgress(0);
-        addLog({ type: "error", text: "Timeout: processo nao respondeu em 5 minutos." });
-        cleanup();
-      }, 300000);
+      armSafetyTimer();
 
       const onDone = () => {
         cleanup();
