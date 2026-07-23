@@ -98,8 +98,41 @@ function lerCsv(csvPath: string): Promise<Record<string, string>[]> {
   })
 }
 
-function normalizarNomePa(name: string): string {
-  return name.replace(/[_-]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase()
+export function normalizarBlade(name: string): string {
+  if (!name) return ''
+  const s = String(name).toLowerCase().trim()
+  const posClean = s
+    .replace(/\b(pala|pá|blade|posicao|posição|pa)\b/gi, '')
+    .replace(/[-_\s]/g, '')
+    .trim()
+  return posClean || s.replace(/[-_\s]/g, '')
+}
+
+export function normalizarTurbine(name: string): string {
+  if (!name) return ''
+  return String(name).toLowerCase().replace(/[^a-z0-9]/gi, '')
+}
+
+export function turbinasCombinam(csvTurbine: string, apiTurbine: string): boolean {
+  if (!csvTurbine || !apiTurbine) return false
+  const normCsv = normalizarTurbine(csvTurbine)
+  const normApi = normalizarTurbine(apiTurbine)
+  if (!normCsv || !normApi) return false
+  if (normCsv === normApi) return true
+  if (normCsv.endsWith(normApi) || normApi.endsWith(normCsv)) return true
+  return false
+}
+
+export function inferirTurbinaDoCaminho(csvPath: string, blades: any[]): string {
+  const normPath = csvPath.toLowerCase().replace(/\\/g, '/')
+  for (const b of blades) {
+    if (!b.turbine) continue
+    const normT = normalizarTurbine(b.turbine)
+    if (normT && normT.length >= 2 && normPath.includes(normT)) {
+      return b.turbine
+    }
+  }
+  return ''
 }
 
 // Colunas que só existem no CSV de upload (photo_data já convertido pra formato Arthnex),
@@ -304,7 +337,8 @@ export async function uploadMultiplasCsv(
   pSurface: string,
   collectDate: string,
   useHomolog = false,
-  webContents?: any
+  webContents?: any,
+  manualOverrides: Record<string, string> = {}
 ): Promise<any> {
   const sendLog = (text: string, type = 'info') => {
     if (webContents) webContents.send('arthlog', { type, text })
@@ -324,10 +358,6 @@ export async function uploadMultiplasCsv(
   try {
     sendLog(`Buscando pás pendentes da workorder para casar com os CSVs...`, 'info')
     const blades = await listarPasPendentes(workorderId, useHomolog)
-    const bladesPorNome: Record<string, any> = {}
-    for (const b of blades) {
-      bladesPorNome[normalizarNomePa(b.blade)] = b
-    }
 
     for (let i = 0; i < csvPaths.length; i++) {
       const csvPath = csvPaths[i]
@@ -345,17 +375,70 @@ export async function uploadMultiplasCsv(
         continue
       }
 
-      const bladeSerial = rows[0]?.blade || ''
-      const matched = bladesPorNome[normalizarNomePa(bladeSerial)]
+      let matched: any = null
 
-      if (!bladeSerial || !matched) {
-        sendLog(`⚠ Pá '${bladeSerial || '(vazio)'}' do CSV '${fileName}' não foi encontrada entre as pás pendentes desta workorder. Pulando...`, 'warning')
-        resultados.push({ arquivo: fileName, success: false, error: `Pá '${bladeSerial}' não encontrada na workorder` })
+      // 1. Checagem de Override Manual explícito
+      const manualWindbladeId = manualOverrides[csvPath]
+      if (manualWindbladeId) {
+        matched = blades.find(b => String(b.id) === String(manualWindbladeId))
+        if (matched) {
+          sendLog(`   Pá selecionada manualmente ➔ Turbina: ${matched.turbine} | Pá: ${matched.blade}`, 'info')
+        }
+      }
+
+      // 2. Auto-Match Inteligente Multi-Nível
+      if (!matched) {
+        const csvBladeRaw = rows[0]?.blade || ''
+        let csvTurbineRaw = rows[0]?.turbine || ''
+
+        if (!csvTurbineRaw) {
+          csvTurbineRaw = inferirTurbinaDoCaminho(csvPath, blades)
+        }
+
+        const normCsvBlade = normalizarBlade(csvBladeRaw)
+
+        // Nível 1: Match por Turbina E Pá
+        const matchesNivel1 = blades.filter(b => {
+          const bladeOk = normalizarBlade(b.blade) === normCsvBlade
+          const turbineOk = turbinasCombinam(csvTurbineRaw, b.turbine)
+          return bladeOk && turbineOk
+        })
+
+        if (matchesNivel1.length === 1) {
+          matched = matchesNivel1[0]
+          sendLog(`   Match automático (Turbina+Pá): ${csvBladeRaw} / ${csvTurbineRaw} ➔ Turbina: ${matched.turbine} | Pá: ${matched.blade}`, 'info')
+        } else if (matchesNivel1.length > 1) {
+          matched = matchesNivel1[0]
+          sendLog(`   ⚠ Múltiplas pás encontradas para Turbina+Pá. Selecionado: Turbina: ${matched.turbine} | Pá: ${matched.blade}`, 'warning')
+        } else {
+          // Nível 2: Match por Serial Único em toda a Workorder
+          const matchesNivel2 = blades.filter(b => normalizarBlade(b.blade) === normCsvBlade)
+          if (matchesNivel2.length === 1) {
+            matched = matchesNivel2[0]
+            sendLog(`   Match por Serial Único: ${csvBladeRaw} ➔ Turbina: ${matched.turbine} | Pá: ${matched.blade}`, 'info')
+          } else if (matchesNivel2.length > 1) {
+            sendLog(
+              `⚠ Ambiguidade Crítica no arquivo '${fileName}': A pá '${csvBladeRaw}' existe em ${matchesNivel2.length} turbinas da Workorder, porém a turbina '${csvTurbineRaw || '(não informada)'}' não bateu com nenhuma. Envio cancelado para evitar erro!`,
+              'error'
+            )
+            resultados.push({
+              arquivo: fileName,
+              success: false,
+              error: `Ambiguidade: Pá '${csvBladeRaw}' existe em várias turbinas e turbina '${csvTurbineRaw}' não coincidiu.`
+            })
+            arquivosComFalha++
+            continue
+          }
+        }
+      }
+
+      if (!matched) {
+        const bladeLabel = rows[0]?.blade || '(vazio)'
+        sendLog(`⚠ Pá '${bladeLabel}' do CSV '${fileName}' não foi encontrada entre as pás pendentes desta workorder. Pulando...`, 'warning')
+        resultados.push({ arquivo: fileName, success: false, error: `Pá '${bladeLabel}' não encontrada na workorder` })
         arquivosComFalha++
         continue
       }
-
-      sendLog(`   Pá detectada: ${bladeSerial} ➔ ${matched.blade} (${matched.turbine})`, 'info')
 
       const r = await processarUploadCsv(
         csvPath, rows, workorderId, String(matched.id), pSurface, collectDate, String(matched.turbine_id), useHomolog,
@@ -382,3 +465,78 @@ export async function uploadMultiplasCsv(
     return { success: false, error: err.message, resultados }
   }
 }
+
+export async function analisarAmbiguidadesCsvs(
+  csvPaths: string[],
+  blades: any[]
+): Promise<Record<string, {
+  status: 'matched' | 'ambiguous' | 'no_match' | 'empty'
+  bladeRaw: string
+  turbineRaw: string
+  matched?: any
+  candidateBlades?: any[]
+}>> {
+  const analysis: Record<string, any> = {}
+  for (const csvPath of csvPaths) {
+    try {
+      const rows = await lerCsv(csvPath)
+      if (!rows || rows.length === 0) {
+        analysis[csvPath] = { status: 'empty', bladeRaw: '', turbineRaw: '' }
+        continue
+      }
+      const csvBladeRaw = rows[0]?.blade || ''
+      let csvTurbineRaw = rows[0]?.turbine || ''
+      if (!csvTurbineRaw) {
+        csvTurbineRaw = inferirTurbinaDoCaminho(csvPath, blades)
+      }
+      const normCsvBlade = normalizarBlade(csvBladeRaw)
+
+      const matchesNivel1 = blades.filter(b => {
+        const bladeOk = normalizarBlade(b.blade) === normCsvBlade
+        const turbineOk = turbinasCombinam(csvTurbineRaw, b.turbine)
+        return bladeOk && turbineOk
+      })
+
+      if (matchesNivel1.length === 1) {
+        analysis[csvPath] = {
+          status: 'matched',
+          bladeRaw: csvBladeRaw,
+          turbineRaw: csvTurbineRaw,
+          matched: matchesNivel1[0]
+        }
+        continue
+      }
+
+      const matchesNivel2 = blades.filter(b => normalizarBlade(b.blade) === normCsvBlade)
+      if (matchesNivel2.length === 1) {
+        analysis[csvPath] = {
+          status: 'matched',
+          bladeRaw: csvBladeRaw,
+          turbineRaw: csvTurbineRaw,
+          matched: matchesNivel2[0]
+        }
+      } else if (matchesNivel2.length > 1) {
+        analysis[csvPath] = {
+          status: 'ambiguous',
+          bladeRaw: csvBladeRaw,
+          turbineRaw: csvTurbineRaw,
+          candidateBlades: matchesNivel2.map(b => ({
+            id: String(b.id),
+            blade: b.blade,
+            turbine: b.turbine
+          }))
+        }
+      } else {
+        analysis[csvPath] = {
+          status: 'no_match',
+          bladeRaw: csvBladeRaw,
+          turbineRaw: csvTurbineRaw
+        }
+      }
+    } catch {
+      analysis[csvPath] = { status: 'empty', bladeRaw: '', turbineRaw: '' }
+    }
+  }
+  return analysis
+}
+

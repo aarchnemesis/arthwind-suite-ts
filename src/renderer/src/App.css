@@ -640,7 +640,7 @@ html, body, #root {
 .log-panel {
   display: flex;
   flex-direction: column;
-  width: 340px;
+  width: 360px;
   flex-shrink: 0;
   overflow: hidden;
   transition: background 0.3s;

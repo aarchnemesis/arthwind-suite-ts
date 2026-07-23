@@ -160,31 +160,31 @@ export default function ArthwindSuite() {
       const done = allInputsFilled;
       const current = !done;
       steps.push(
-        <span key="s1" className={`mh-step${done ? " done" : current ? " current" : ""}`}>
-          {done ? "✓" : "○"}{" "}
+        <span key="s1" className={`mh-step${done ? " done" : current ? " current" : ""}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+          {done ? Icons.checkCircle(D.success) : <span style={{ opacity: 0.5 }}>○</span>}
           {module.inputs.length === 1 ? "Selecionar arquivo" : "Selecionar arquivos"}
         </span>
       );
     }
 
     if (hasOptions) {
-      steps.push(<span key="sep1" className="mh-step-sep">›</span>);
+      steps.push(<span key="sep1" className="mh-step-sep">{Icons.chevronRight(D.textMuted)}</span>);
       const done = optsDone && (hasInputs ? allInputsFilled : true);
       const current = !done && (hasInputs ? allInputsFilled : true);
       steps.push(
-        <span key="s2" className={`mh-step${done ? " done" : current ? " current" : ""}`}>
-          {done ? "✓" : "○"} Configurar
+        <span key="s2" className={`mh-step${done ? " done" : current ? " current" : ""}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+          {done ? Icons.checkCircle(D.success) : <span style={{ opacity: 0.5 }}>○</span>} Configurar
         </span>
       );
     }
 
-    if (steps.length > 0) steps.push(<span key="sep2" className="mh-step-sep">›</span>);
+    if (steps.length > 0) steps.push(<span key="sep2" className="mh-step-sep">{Icons.chevronRight(D.textMuted)}</span>);
 
     const execDone = ran && !running;
     const execCurrent = !execDone && (hasInputs ? allInputsFilled : true) && (hasOptions ? optsDone : true);
     steps.push(
-      <span key="s3" className={`mh-step${execDone ? " done" : execCurrent ? " current" : ""}`}>
-        {execDone ? (lastRunHadError ? "✗" : "✓") : "○"} Executar
+      <span key="s3" className={`mh-step${execDone ? " done" : execCurrent ? " current" : ""}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+        {execDone ? (lastRunHadError ? Icons.xCircle(D.error) : Icons.checkCircle(D.success)) : <span style={{ opacity: 0.5 }}>○</span>} Executar
       </span>
     );
 
@@ -243,8 +243,8 @@ export default function ArthwindSuite() {
           }}
           title={sidebarCollapsed ? "Expandir menu lateral" : "Recolher menu lateral"}
         >
-          <span style={{ fontSize: "11px", fontWeight: "bold" }}>
-            {sidebarCollapsed ? "❯" : "❮"}
+          <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {sidebarCollapsed ? Icons.chevronRight(D.textSecond) : Icons.chevronLeft(D.textSecond)}
           </span>
         </button>
 

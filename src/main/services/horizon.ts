@@ -228,20 +228,34 @@ function suggestTurbineMatch(nomeHorizon: string, opcoesAtw: string[]): [string,
   return [melhorOpcao, melhorScore]
 }
 
-function parseDateToMmDdYyyy(raw: string): string {
-  const val = String(raw).trim()
-  if (!val || ['nan', 'nat', 'none', 'null'].includes(val.toLowerCase())) {
-    return ''
+function parseDateFlexible(val: any): Date | null {
+  if (!val || ['nan', 'nat', 'none', 'null'].includes(String(val).trim().toLowerCase())) {
+    return null
   }
-  const parsed = parseDate(val)
-  if (parsed) {
-    const mm = String(parsed.getMonth() + 1).padStart(2, '0')
-    const dd = String(parsed.getDate()).padStart(2, '0')
-    const yyyy = parsed.getFullYear()
-    return `${mm}/${dd}/${yyyy}`
+  const s = String(val).trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y, m, d] = s.split('-').map(Number)
+    return new Date(y, m - 1, d)
   }
-  return ''
+  const parts = s.split('/')
+  if (parts.length === 3 && !isNaN(Number(parts[0])) && Number(parts[0]) > 12) {
+    const [d, m, y] = parts.map(Number)
+    return new Date(y, m - 1, d)
+  }
+  return parseDate(s)
 }
+
+function formatDateIso(val: any): string {
+  const d = parseDateFlexible(val)
+  if (!d || isNaN(d.getTime())) {
+    return String(val || '').trim()
+  }
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
 
 function toCsv(data: any[], delimiter = ','): string {
   if (data.length === 0) return ''
@@ -262,15 +276,11 @@ function toCsv(data: any[], delimiter = ','): string {
 
 function toDamageCsv(data: any[]): string {
   if (data.length === 0) return ''
-  const standardHeaders = ['Notes', 'Photo File Name', 'Coordinates', 'Inspection Date', 'Date', 'Site', 'Turbine']
-  const rowHeaders = Object.keys(data[0])
-  const headers = Array.from(new Set([...standardHeaders, ...rowHeaders]))
-  
-  const csvLines = [headers.join(',')]
+  const csvLines = [SKYSPECS_COLUMNS.join(',')]
   data.forEach(row => {
-    const line = headers.map(h => {
-      let val = String(row[h] || '').trim().replace(/^"|"$/g, '').replace(/^'|'$/g, '')
-      if (h === 'Coordinates') {
+    const line = SKYSPECS_COLUMNS.map(c => {
+      let val = String(row[c] ?? '').trim().replace(/^"|"$/g, '').replace(/^'|'$/g, '')
+      if (c === 'Coordinates') {
         return `"${val}"`
       }
       if (val.includes(',') || val.includes('"') || val.includes('\n')) {
@@ -383,6 +393,12 @@ export const SKYSPECS_COLUMNS = [
   "Distance (m)", "Coordinates"
 ]
 
+function cleanParentheses(str: string): string {
+  if (!str) return ""
+  const cleaned = String(str).replace(/\s*\([^)]*\)/g, "").trim()
+  return cleaned === "None" ? "" : cleaned
+}
+
 function remapSeverity(skyType: string, skyMaterial: string, sevStr: string, widthStr: string, subtype = ""): [string, string] {
   const sev = parseInt(sevStr, 10)
   if (isNaN(sev)) {
@@ -390,7 +406,7 @@ function remapSeverity(skyType: string, skyMaterial: string, sevStr: string, wid
   }
 
   // Discoloration Mec.Oil → sempre Sev 2, inclusive quando sev original é 0
-  if (skyType === "Discoloration" && subtype === "Mechanical (Oil)") {
+  if (skyType === "Discoloration" && (subtype.includes("Mechanical") || subtype.includes("Oil"))) {
     if (sev !== 2) {
       return ["2", `Sev convertida Discoloration Mec.Oil: ${sev}➔2`]
     }
@@ -510,6 +526,9 @@ function convertDamagesDf(df: any[], filename: string): DmgConversionResult {
     const rawSurface = surfaceCol ? String(row[surfaceCol] || "").trim().toLowerCase() : ""
     const damageLocation = rawSurface === "external" ? "External" : "Internal"
 
+    const finalSkyType = cleanParentheses(skyType)
+    const finalSubtype = cleanParentheses(subtypeOut)
+
     if (flag) {
       flags.push({
         "Arquivo": filename,
@@ -517,8 +536,8 @@ function convertDamagesDf(df: any[], filename: string): DmgConversionResult {
         "Tipo original": arthwindType,
         "Component (novo)": component,
         "Material (novo)": material,
-        "Type (novo)": skyType,
-        "Subtype (novo)": subtypeOut,
+        "Type (novo)": finalSkyType,
+        "Subtype (novo)": finalSubtype,
         "Severity (novo)": severityFinal,
         "FLAG": flag
       })
@@ -526,11 +545,11 @@ function convertDamagesDf(df: any[], filename: string): DmgConversionResult {
 
     convertedRows.push({
       "Photo File Name": String(row["Photo File Name"] || ""),
-      "Date":            String(row["Date"] || ""),
+      "Date":            formatDateIso(row["Date"] || row["Inspection Date"] || ""),
       "Component":       component,
       "Material":        material,
-      "Type":            skyType,
-      "Subtype":         subtypeOut,
+      "Type":            finalSkyType,
+      "Subtype":         finalSubtype,
       "Damage Location": damageLocation,
       "Blade Side":      String(row["Blade Side"] || ""),
       "Severity":        severityFinal,
@@ -558,18 +577,21 @@ export async function horizonAnalisar(horizonPaths: string[], atwPaths: string[]
     const { df: dfAtw, n_duplicatas: nDup } = deduplicateAtw(dfAtwRaw)
 
     // Se atwPaths[0] existe, busca arquivos adicionais no mesmo diretório para avisar se houver inconsistência
-    if (atwPaths.length > 0 && fs.existsSync(atwPaths[0])) {
+    const dirBase = path.basename(path.dirname(atwPaths[0] || '')).toLowerCase()
+    const isGenericDir = ['downloads', 'desktop', 'documents', 'downloads_files'].includes(dirBase)
+    if (!isGenericDir && atwPaths.length > 0 && fs.existsSync(atwPaths[0])) {
       const dir = path.dirname(atwPaths[0])
       
       let detailsCount = 0
       let detailsTurbines: string[] = []
       
-      // 1. Procurar arquivos galleries ou details
+      // 1. Procurar arquivos galleries ou details (ignorando artefatos gerados como details_final/summary_final)
       try {
         const files = fs.readdirSync(dir)
         const detailsFile = files.find(f => {
           const fl = f.toLowerCase()
-          return (fl.includes('galleries') || fl.includes('details') || fl.includes('gallery')) && fl.endsWith('.csv')
+          return (fl.includes('galleries') || fl.includes('details') || fl.includes('gallery')) &&
+                 !fl.includes('details_final') && !fl.includes('summary_final') && fl.endsWith('.csv')
         })
         if (detailsFile) {
           const detailsPath = path.join(dir, detailsFile)
@@ -853,9 +875,9 @@ export function validateRequirements(
       })
 
       if (formatoBr) {
-        avisos.push("Summary: datas em formato BR (dd/mm/yyyy) — serão convertidas automaticamente para mm/dd/yyyy")
+        avisos.push("Summary: datas em formato BR (dd/mm/yyyy) — serão convertidas automaticamente para YYYY-MM-DD")
       } else if (ambiguo) {
-        avisos.push("Summary: datas com formato ambíguo — verifique se estão em mm/dd/yyyy")
+        avisos.push("Summary: datas com formato ambíguo — verifique se estão no padrão YYYY-MM-DD")
       }
     }
 
@@ -1133,7 +1155,7 @@ export async function horizonGerarPacote(
       }
       if (hasDateCol) {
         const val = lookupVal(t, atwDate, atwNormDate)
-        row['Inspection Date'] = parseDateToMmDdYyyy(val)
+        row['Inspection Date'] = formatDateIso(val)
       }
       if (hasTypeCol) {
         row['Inspection Type'] = lookupVal(t, atwType, atwNormType)
@@ -1190,6 +1212,34 @@ export async function horizonGerarPacote(
 
       dfDetailsFinal = dfD
       zip.file("details_final.csv", toCsv(dfD, ';'))
+      zip.file("Details/details_final.csv", toCsv(dfD, ';'))
+
+      // Divisão do Details em lotes de até 20 aerogeradores (turbinas)
+      const rowsByTurbine: Record<string, any[]> = {}
+      const uniqueTurbinesInDetails: string[] = []
+
+      dfD.forEach(row => {
+        const turbId = String(row[idc] || '').trim()
+        if (!rowsByTurbine[turbId]) {
+          rowsByTurbine[turbId] = []
+          uniqueTurbinesInDetails.push(turbId)
+        }
+        rowsByTurbine[turbId].push(row)
+      })
+
+      const CHUNK_SIZE = 20
+      for (let i = 0; i < uniqueTurbinesInDetails.length; i += CHUNK_SIZE) {
+        const chunkTurbines = uniqueTurbinesInDetails.slice(i, i + CHUNK_SIZE)
+        const chunkRows: any[] = []
+        chunkTurbines.forEach(t => {
+          chunkRows.push(...rowsByTurbine[t])
+        })
+        const loteNum = Math.floor(i / CHUNK_SIZE) + 1
+        const startNum = String(i + 1).padStart(2, '0')
+        const endNum = String(Math.min(i + CHUNK_SIZE, uniqueTurbinesInDetails.length)).padStart(2, '0')
+        const loteFilename = `Details/details_lote_${loteNum}_turbinas_${startNum}_a_${endNum}.csv`
+        zip.file(loteFilename, toCsv(chunkRows, ';'))
+      }
 
       if (nRadCorrigidos > 0) {
         errosPos.push(`Details: ${nRadCorrigidos} valor(es) de Radial Distance fora de [-3, 200] corrigido(s) para 0 (fotos humanizadas/VISUAL) sem Z válido.`)
@@ -1231,10 +1281,10 @@ export async function horizonGerarPacote(
                 row['Turbine'] = horizonTurbineName
                 row['Site'] = siteVal
                 row['Inspection Date'] = dateVal
-                row['Date'] = dateVal
+                row['Date'] = formatDateIso(row['Date'] || dateVal)
               })
 
-              const zipFilename = `${horizonTurbineName}.csv`
+              const zipFilename = `Damages/${horizonTurbineName}.csv`
               zip.file(zipFilename, toDamageCsv(convertedRows))
               
               convertedRows.forEach(row => {

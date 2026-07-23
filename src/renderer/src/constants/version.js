@@ -1,3 +1,5 @@
-// ATENÇÃO: arquivo gerado automaticamente por scripts/sync-version.mjs
-// Não edite manualmente — fonte da verdade é arthwind-Tools/version.py
-export const VERSION = "1.3.1";
+import packageJson from '../../../../package.json';
+
+// Fonte única da verdade para a versão da aplicação é o package.json
+export const VERSION = packageJson.version;
+

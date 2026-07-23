@@ -13,7 +13,7 @@ export const translations = {
       { id: 7, label: "Restaurar Alturas (Z=0)",      icon: "gps",      short: "Restaurar Location", group: "Arthdrone" },
       { id: 8, label: "Recuperar Fotos Perdidas",  icon: "photos",   short: "Fotos fantasma (SD)", group: "Arthdrone" },
       { id: 12, label: "Gerar CSV Arthnex (Upload Interno)",    icon: "packer",   short: "CSV upload interno",   group: "Arthbot" },
-      { id: 19, label: "Arthnex Uploader",    icon: "upload",   short: "Upload via API (corrigido)",   group: "Arthbot" },
+      { id: 19, label: "Arthnex Uploader",    icon: "upload",   short: "Upload via API (corrigido)",   group: "Ferramentas" },
       { id: 13, label: "Padronizar GoPro para Arthnex", icon: "organize", short: "Renomear pelo nome",    group: "Arthbot" },
       { id: 15, label: "Calibrar Z GoPro RAW", icon: "gps",      short: "Passo fixo 500mm", group: "Arthbot" },
       { id: 4, label: "Converter Delimitador de CSV",     icon: "csv",      short: "CSV para Excel", group: "Ferramentas" },
