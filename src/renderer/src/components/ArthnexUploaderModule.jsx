@@ -53,16 +53,20 @@ export default function ArthnexUploaderModule({ T, D }) {
   }, [addLog]);
 
   useEffect(() => {
-    if (!csvPaths.length || !pendingBlades.length || typeof window.pywebview === 'undefined') {
+    if (!csvPaths.length || !pendingBlades.length || typeof window.pywebview === 'undefined' || typeof window.pywebview.api?.arthnex_analisar_csvs !== 'function') {
       setCsvAnalysis({});
       return;
     }
     let isMounted = true;
-    window.pywebview.api.arthnex_analisar_csvs(csvPaths, pendingBlades).then(res => {
-      if (isMounted && res) {
-        setCsvAnalysis(res);
-      }
-    });
+    window.pywebview.api.arthnex_analisar_csvs(csvPaths, pendingBlades)
+      .then(res => {
+        if (isMounted && res) {
+          setCsvAnalysis(res);
+        }
+      })
+      .catch(err => {
+        console.error("Erro ao analisar ambiguidades de CSVs:", err);
+      });
     return () => { isMounted = false; };
   }, [csvPaths, pendingBlades]);
 
@@ -120,23 +124,28 @@ export default function ArthnexUploaderModule({ T, D }) {
   }, [workorders, onChangeWorkorder]);
 
   const pickCsvs = async () => {
-    const paths = await window.pywebview.api.pick_files('csv');
-    if (paths && paths.length > 0) {
-      setCsvPaths(prev => [...new Set([...prev, ...paths])]);
+    if (typeof window.pywebview === 'undefined' || !window.pywebview.api?.pick_files) return;
+    const res = await window.pywebview.api.pick_files('csv');
+    const pathsList = Array.isArray(res) ? res : (typeof res === 'string' ? [res] : []);
+    if (pathsList.length > 0) {
+      const validPaths = pathsList.filter(p => typeof p === 'string' && p.trim().length > 0);
+      setCsvPaths(prev => [...new Set([...prev, ...validPaths])]);
     }
   };
 
   const pickFolder = async () => {
+    if (typeof window.pywebview === 'undefined' || !window.pywebview.api?.pick_folder) return;
     const folder = await window.pywebview.api.pick_folder();
-    if (!folder) return;
+    if (!folder || typeof folder !== 'string') return;
     setLogs(prev => [...prev, { text: `Procurando CSVs de upload em: ${folder}...`, type: 'info' }]);
     const found = await window.pywebview.api.arthnex_descobrir_csvs(folder);
-    if (found.length === 0) {
+    const foundList = Array.isArray(found) ? found : [];
+    if (foundList.length === 0) {
       addLog(`Nenhum CSV de upload encontrado em ${folder}.`, 'warning');
       return;
     }
-    setCsvPaths(prev => [...new Set([...prev, ...found])]);
-    addLog(`${found.length} CSV(s) de upload encontrado(s) e adicionado(s).`, 'success');
+    setCsvPaths(prev => [...new Set([...prev, ...foundList])]);
+    addLog(`${foundList.length} CSV(s) de upload encontrado(s) e adicionado(s).`, 'success');
   };
 
   const removeCsv = (path) => {
