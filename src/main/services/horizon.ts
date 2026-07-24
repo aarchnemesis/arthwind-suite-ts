@@ -577,65 +577,7 @@ export async function horizonAnalisar(horizonPaths: string[], atwPaths: string[]
     const { df: dfAtw, n_duplicatas: nDup } = deduplicateAtw(dfAtwRaw)
 
     // Se atwPaths[0] existe, busca arquivos adicionais no mesmo diretório para avisar se houver inconsistência
-    const dirBase = path.basename(path.dirname(atwPaths[0] || '')).toLowerCase()
-    const isGenericDir = ['downloads', 'desktop', 'documents', 'downloads_files'].includes(dirBase)
-    if (!isGenericDir && atwPaths.length > 0 && fs.existsSync(atwPaths[0])) {
-      const dir = path.dirname(atwPaths[0])
-      
-      let detailsCount = 0
-      let detailsTurbines: string[] = []
-      
-      // 1. Procurar arquivos galleries ou details (ignorando artefatos gerados como details_final/summary_final)
-      try {
-        const files = fs.readdirSync(dir)
-        const detailsFile = files.find(f => {
-          const fl = f.toLowerCase()
-          return (fl.includes('galleries') || fl.includes('details') || fl.includes('gallery')) &&
-                 !fl.includes('details_final') && !fl.includes('summary_final') && fl.endsWith('.csv')
-        })
-        if (detailsFile) {
-          const detailsPath = path.join(dir, detailsFile)
-          const contentDetails = fs.readFileSync(detailsPath, 'utf-8')
-          const dfD = loadCsvRobust(contentDetails)
-          if (dfD && dfD.length > 0) {
-            const idc = 'ID' in dfD[0] ? 'ID' : Object.keys(dfD[0])[0]
-            detailsTurbines = Array.from(new Set(dfD.map(row => String(row[idc] || '').trim()).filter(Boolean)))
-            detailsCount = detailsTurbines.length
-          }
-        }
-      } catch (e) {
-        // Ignore
-      }
 
-      // 2. Procurar pasta Damages ou Danos
-      let damagesCount = 0
-      try {
-        const files = fs.readdirSync(dir)
-        const damagesDirName = files.find(f => {
-          const fl = f.toLowerCase()
-          return fl === 'damages' || fl === 'damages_atw' || fl === 'danos'
-        })
-        if (damagesDirName) {
-          const damagesDirPath = path.join(dir, damagesDirName)
-          const stat = fs.statSync(damagesDirPath)
-          if (stat.isDirectory()) {
-            const damFiles = fs.readdirSync(damagesDirPath)
-            damagesCount = damFiles.filter(f => f.toLowerCase().endsWith('.csv')).length
-          }
-        }
-      } catch (e) {
-        // Ignore
-      }
-
-      const summaryTurbines = new Set(dfAtw.map(r => String(r.Turbine || '').trim()).filter(Boolean))
-      
-      if ((detailsCount > 0 && summaryTurbines.size < detailsCount) || (damagesCount > 0 && summaryTurbines.size < damagesCount)) {
-        return {
-          success: false,
-          error: `Inconsistência Crítica detectada no diretório: O resumo carregado (summary_atw.csv) contém apenas ${summaryTurbines.size} turbina(s), mas foram encontradas ${detailsCount} turbinas no arquivo de fotos (galleries_atw.csv) e ${damagesCount} turbinas na pasta de Danos (Damages). Por favor, exporte novamente o resumo do ATW contendo todas as turbinas antes de prosseguir.`
-        }
-      }
-    }
 
     const result = validateNomenclature(dfHor, dfAtw, {}, [], [], nDup)
     return result
@@ -830,25 +772,6 @@ export function validateRequirements(
     : loadCsvRobust(contentSummary)
   const dfD = loadCsvRobust(contentDetails)
 
-  if (dfS && dfS.length > 0 && dfD && dfD.length > 0) {
-    const turbinesInSummary = new Set(dfS.map(r => String(r.Turbine || '').trim()).filter(Boolean))
-    const idc = 'ID' in dfD[0] ? 'ID' : Object.keys(dfD[0])[0]
-    const turbinesInDetails = new Set(dfD.map(r => String(r[idc] || '').trim()).filter(Boolean))
-
-    const missingInSummary = Array.from(turbinesInDetails).filter(t => !turbinesInSummary.has(t))
-    if (missingInSummary.length > 0) {
-      erros.push(`Inconsistência Crítica: O arquivo de fotos (galleries_atw.csv) contém ${turbinesInDetails.size} turbina(s), mas o resumo (summary_atw.csv) só contém ${turbinesInSummary.size} turbina(s). Estão faltando no resumo as seguintes turbinas: ${missingInSummary.sort().join(', ')}. Por favor, exporte novamente o resumo do ATW contendo todas as turbinas.`)
-    }
-  }
-
-  if (dfS && dfS.length > 0 && damagesContents && damagesContents.length > 0) {
-    const turbinesInSummary = new Set(dfS.map(r => String(r.Turbine || '').trim()).filter(Boolean))
-    const damagesTurbines = damagesContents.map(([filename]) => path.basename(filename, '.csv').trim())
-    const missingInSummaryFromDamages = damagesTurbines.filter(t => !turbinesInSummary.has(t))
-    if (missingInSummaryFromDamages.length > 0) {
-      erros.push(`Inconsistência de Danos: A pasta de Danos (Damages) contém arquivos para ${damagesContents.length} turbina(s), mas o resumo (summary_atw.csv) só tem ${turbinesInSummary.size} turbina(s). Estão faltando no resumo: ${missingInSummaryFromDamages.sort().join(', ')}.`)
-    }
-  }
 
   // ── Summary ──
   if (dfS && dfS.length > 0 && 'Turbine' in dfS[0]) {
@@ -1269,6 +1192,10 @@ export async function horizonGerarPacote(
           if (dfM.length > 0) {
             const turbineFromFilename = path.basename(dp, '.csv').trim()
             const horizonTurbineName = atwParaHor[turbineFromFilename] || turbineFromFilename
+            if (!horizonDates[horizonTurbineName]) {
+              // Pula arquivos de danos extras que não pertencem ao resumo da Horizon
+              continue
+            }
             const dateVal = horizonDates[horizonTurbineName] || ''
             const siteVal = horizonSites[horizonTurbineName] || ''
 
