@@ -52,7 +52,10 @@ const ipcMethods = [
   'detectar_estrutura_abc',
   'ler_json_referencia_pixel_mm',
   'reconstruir_csv_multi',
-  'carregar_fotos_reconstruir_sync'
+  'carregar_fotos_reconstruir_sync',
+  'batch_360_stitch',
+  'snow_process_excel',
+  'snow_process_excel_batch'
 ]
 
 const api: Record<string, (...args: any[]) => Promise<any>> = {}
@@ -70,7 +73,10 @@ const events = [
   'gps_fotos_loaded',
   'blade_split_analise',
   'fotos_reconstruir_loaded',
-  'gopro_raw_analise'
+  'gopro_raw_analise',
+  'batch_stitch_log',
+  'snow_progress',
+  'snow_batch_status'
 ]
 
 for (const eventName of events) {

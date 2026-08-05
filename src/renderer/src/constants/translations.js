@@ -23,6 +23,7 @@ export const translations = {
       { id: 20, label: "Substituir Vídeos Insta360", icon: "photos", short: "Substituição 360", group: "Ferramentas" },
       { id: 21, label: "Enviar Vídeos Arthfilm para o Drive", icon: "upload", short: "Arthfilm para o Drive", group: "Ferramentas" },
       { id: 16, label: "Horizon Processor",    icon: "file",     short: "Empacotamento Horizon", group: "Plataforma do Cliente" },
+      { id: 23, label: "SNOW Processor",       icon: "file",     short: "Processador SNOW",      group: "Plataforma do Cliente" },
       { id: 9, label: "Documentação",     icon: "docs",     short: "Manual passo a passo", group: "Suporte" },
     ],
     fields: {
@@ -241,7 +242,16 @@ export const translations = {
         ],
         action: "Sincronizar Vídeos"
       },
+      23: {
+        title: "23. SNOW Processor",
+        desc: "Módulo customizado para processar planilhas de inspeção interna e externa para a plataforma SNOW.",
+        inputs: [],
+        options: [],
+        action: "Processar SNOW",
+        wideLayout: true,
+      },
     },
+
     log_title: "Log de Execução",
     log_placeholder: "A saída da ferramenta aparecerá aqui.",
     clear: "Limpar",
@@ -280,6 +290,7 @@ export const translations = {
       { id: 14, label: "Link Arthnex/CSV",     icon: "organize", short: "Match photos/metadata",  group: "Platform" },
       { id: 15, label: "Calibrate GoPro RAW Z", icon: "gps",      short: "Fixed 500mm step",      group: "Arthbot"  },
       { id: 16, label: "Horizon Processor",      icon: "file",     short: "Horizon packaging",    group: "Horizon"  },
+      { id: 23, label: "SNOW Processor",         icon: "file",     short: "SNOW Processor",       group: "Platform" },
       { id: 17, label: "Workflow Analysis (Smartsheet)", icon: "organize", short: "Smartsheet Audit", group: "Tools" },
       { id: 20, label: "Replace Insta360 Videos", icon: "photos", short: "Insta360 Replacer", group: "Tools" },
       { id: 21, label: "Upload Arthfilm Videos to Drive", icon: "upload", short: "Arthfilm to Drive", group: "Tools" },
@@ -500,6 +511,14 @@ export const translations = {
         ],
         action: "Sync Videos"
       },
+      23: {
+        title: "23. SNOW Processor",
+        desc: "Custom module to process internal and external inspection spreadsheets for the SNOW platform.",
+        inputs: [],
+        options: [],
+        action: "Process SNOW",
+        wideLayout: true,
+      },
     },
     log_title: "Execution Log",
     log_placeholder: "Process output will appear here after running.",
@@ -527,7 +546,8 @@ export const GROUP_COLORS = {
   "Ferramentas": "#059669",
   "Plataforma do Cliente": "#c97d1e",
   "Suporte": "#64748b",
-  "S&R Flow": "#2e5aa0",
+  "Video 360": "#7c3aed",
+  "S\u0026R Flow": "#2e5aa0",
   "Fixes":    "#e55b2d",
   "Tools":    "#059669",
   "Platform": "#c97d1e",

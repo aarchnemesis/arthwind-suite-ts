@@ -61,7 +61,8 @@ export default function ArthwindSuite() {
   const module = T.fields[active];
 
   // Módulos com layout próprio que ocupam a largura total
-  const isWideModule = active === 11 || active === 16 || active === 17 || active === 19;
+  const isWideModule = active === 11 || active === 16 || active === 17 || active === 19 || active === 23;
+
 
   // Info do módulo activo (grupo, ícone)
   const moduleInfo  = T.modules.find(m => m.id === active) || {};

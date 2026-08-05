@@ -50,6 +50,8 @@ import {
 } from './services/uploader'
 import { substituirVideos360 } from './services/videoReplacer'
 import { enviarVideosDrive } from './services/videoUploader'
+import { batchStitchDirectory } from './services/batch360Stitcher'
+import { processSnowExcel, processSnowExcelBatch } from './services/snowProcessor'
 
 // Configuration Helpers
 function getConfigPath(): string {
@@ -455,6 +457,20 @@ app.whenReady().then(() => {
   ipcMain.handle('carregar_fotos_reconstruir_sync', async (event, pasta: string) => {
     const fotos = await carregarFotosReconstruir(pasta, event.sender)
     return { success: true, fotos }
+  })
+
+  // ─── Batch 360 Stitcher IPC Handler ──────────────────────────────────────────
+  ipcMain.handle('batch_360_stitch', async (event, rootDir: string, mode: 'insprj' | 'ffmpeg') => {
+    return batchStitchDirectory(rootDir, mode, event.sender)
+  })
+
+  // ─── SNOW Processor IPC Handlers ──────────────────────────────────────────────
+  ipcMain.handle('snow_process_excel', async (event, excelPath: string, outputDir: string) => {
+    return processSnowExcel(excelPath, outputDir, event.sender)
+  })
+
+  ipcMain.handle('snow_process_excel_batch', async (event, excelPaths: string[], outputDir: string) => {
+    return processSnowExcelBatch(excelPaths, outputDir, event.sender)
   })
 
   createWindow()
