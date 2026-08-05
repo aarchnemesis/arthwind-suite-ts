@@ -683,14 +683,17 @@ export async function processSnowExcel(
     const bladeArea     = SnowMappings.getBladeArea(component, side)
     const subComponent  = SnowMappings.getSubComponent(component) // Dynamic component mapping!
 
+    const dfStartStr = dfStart.toFixed(1)
+    const dfEndStr   = dfEnd.toFixed(1)
+
     // Add row to excel
     const newRow = outWs.addRow([
       String(bladeSn),           // A — Blade serial number
       subComponent,              // B — Sub Component
       failureType,               // C — Failure Type
       damageDesc,                // D — Damage Description
-      dfStart,                   // E — DF distance Start
-      dfEnd,                     // F — DF distance End
+      dfStartStr,                // E — DF distance Start (string formatada com ponto)
+      dfEndStr,                  // F — DF distance End (string formatada com ponto)
       profileDepth,              // G — Profile Depth Start
       profileDepth,              // H — Profile Depth End (same value)
       'Inside',                  // I — Inside/Outside
@@ -702,6 +705,7 @@ export async function processSnowExcel(
       turbineSn,                 // O — Turbine SN
       poi ?? null,               // P — POI
     ])
+
 
     // Apply soft red highlight if it's Delamination >= 45m
     if (SnowMappings.shouldHighlight(failureType, dfStart)) {
