@@ -69,13 +69,19 @@ export class SnowMappings {
     return this.FAILURE_TYPES[key] ?? 'Type of Failure is Missing'
   }
 
-  static getDamageDescription(bladeSn: string | number, _originalFailure?: string): string {
+  static getDamageDescription(bladeSn: string | number, originalFailure: string): string {
     const rawSn = String(bladeSn || '').replace(/^B/i, '').replace(/^0+/, '')
     const paddedBladeSn = rawSn ? rawSn.padStart(4, '0') : '0000'
     const setVal = getSetNumber(bladeSn)
     const setStr = setVal ? String(setVal).padStart(2, '0') : 'N/A'
-    return `Inspection as per K1003_WI_10664_EN_03 Blade: S/N${paddedBladeSn} Set ${setStr}`
+    return [
+      'Inspection as per K1003_WI_10664_EN_03',
+      `Blade: S/N${paddedBladeSn} Set ${setStr}`,
+      'Inspection number: 1',
+      originalFailure,
+    ].join('\n')
   }
+
 
 
   static getProfile(section: string): number | string {
