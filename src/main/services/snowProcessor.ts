@@ -73,12 +73,11 @@ export class SnowMappings {
     const rawSn = String(bladeSn || '').replace(/^B/i, '').replace(/^0+/, '')
     const paddedBladeSn = rawSn ? rawSn.padStart(4, '0') : '0000'
     const info = getBladeInfo(bladeSn)
-    const setStr = info.setNumber ? `Set ${String(info.setNumber).padStart(2, '0')}` : 'Set N/A'
+    const setStr = info.setNumber ? String(info.setNumber).padStart(2, '0') : 'N/A'
 
     return [
       'Inspection as per SN_241',
-      `Blade: S/N${paddedBladeSn}`,
-      setStr,
+      `Blade: S/N${paddedBladeSn} Set ${setStr}`,
       'Inspection number: 1',
       originalFailure,
     ].join('\n')
