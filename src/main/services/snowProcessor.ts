@@ -111,7 +111,7 @@ export class SnowMappings {
 
   static getSubComponent(component: string): string {
     const c = (component || '').trim().toUpperCase()
-    if (c === 'TE WEB' || c === 'MAIN WEB') return 'Blade Inside - Shear Web'
+    if (c === 'TE WEB' || c === 'MAIN WEB') return 'Blade Inside - Web Laminate'
     return 'Blade Inside - Shell'
   }
 
