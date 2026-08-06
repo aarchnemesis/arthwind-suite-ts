@@ -6,7 +6,7 @@ import os from 'os'
 import ExcelJS from 'exceljs'
 import sharp from 'sharp'
 import { equirectPolygonToPinhole, renderEquirectPinhole } from './polygonUtils'
-import { getSetNumber } from './bladeSets'
+import { getBladeInfo } from './bladeSets'
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
 
@@ -72,15 +72,19 @@ export class SnowMappings {
   static getDamageDescription(bladeSn: string | number, originalFailure: string): string {
     const rawSn = String(bladeSn || '').replace(/^B/i, '').replace(/^0+/, '')
     const paddedBladeSn = rawSn ? rawSn.padStart(4, '0') : '0000'
-    const setVal = getSetNumber(bladeSn)
-    const setStr = setVal ? String(setVal).padStart(2, '0') : 'N/A'
+    const info = getBladeInfo(bladeSn)
+    const setStr = info.setNumber ? `Set ${String(info.setNumber).padStart(2, '0')}` : 'Set N/A'
+
     return [
-      'Inspection as per K1003_WI_10664_EN_03',
-      `Blade: S/N${paddedBladeSn} Set ${setStr}`,
+      'Inspection as per SN_241',
+      `Blade: S/N${paddedBladeSn}`,
+      setStr,
       'Inspection number: 1',
       originalFailure,
     ].join('\n')
   }
+
+
 
 
 
@@ -683,17 +687,21 @@ export async function processSnowExcel(
     const bladeArea     = SnowMappings.getBladeArea(component, side)
     const subComponent  = SnowMappings.getSubComponent(component) // Dynamic component mapping!
 
+    const bladeInfo = getBladeInfo(bladeSn)
+    const fullBladeSerial = bladeInfo.serial || String(bladeSn)
+
     const dfStartStr = dfStart.toFixed(1)
     const dfEndStr   = dfEnd.toFixed(1)
 
     // Add row to excel
     const newRow = outWs.addRow([
-      String(bladeSn),           // A — Blade serial number
+      fullBladeSerial,           // A — Blade serial number (13 dígitos se disponível)
       subComponent,              // B — Sub Component
       failureType,               // C — Failure Type
       damageDesc,                // D — Damage Description
       dfStartStr,                // E — DF distance Start (string formatada com ponto)
       dfEndStr,                  // F — DF distance End (string formatada com ponto)
+
       profileDepth,              // G — Profile Depth Start
       profileDepth,              // H — Profile Depth End (same value)
       'Inside',                  // I — Inside/Outside

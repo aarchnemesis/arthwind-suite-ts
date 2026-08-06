@@ -63,10 +63,27 @@ function loadBladeSets(): BladeSetEntry[] {
   }
 }
 
+export interface BladeInfo {
+  serial: string | null
+  setNumber: string | null
+}
+
 /** Retorna o Set Number pro Blade SN dado, ou null se não achar na lista. */
 export function getSetNumber(bladeSn: string | number): string | null {
-  const key = String(bladeSn).trim().replace(/^0+/, '') || '0'
+  const key = String(bladeSn).trim().replace(/^B/i, '').replace(/^0+/, '') || '0'
   const entries = loadBladeSets()
   const match = entries.find((e) => e.bladeSn === key)
   return match?.setNumber ?? null
 }
+
+/** Retorna informações completas da pá (Serial de 13 dígitos e Set Number). */
+export function getBladeInfo(bladeSn: string | number): BladeInfo {
+  const key = String(bladeSn).trim().replace(/^B/i, '').replace(/^0+/, '') || '0'
+  const entries = loadBladeSets()
+  const match = entries.find((e) => e.bladeSn === key)
+  return {
+    serial: match?.serial ?? null,
+    setNumber: match?.setNumber ?? null,
+  }
+}
+
