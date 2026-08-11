@@ -270,12 +270,11 @@ async function processarUploadCsv(
     })
 
     const total = presigns.length
-    let enviados = 0
     const falhas: any[] = []
-    let queuePool: any[] = []
+    const enviadosQueue: any[] = []
+    let completed = 0
 
-    for (let i = 0; i < total; i++) {
-      const item = presigns[i]
+    async function uploadOne(item: any): Promise<void> {
       const row = rowsByBasename[item.originalFilename]
       const localName = row ? row.image_id : item.originalFilename
       const localPath = path.join(fotosDir, localName)
@@ -291,9 +290,8 @@ async function processarUploadCsv(
           }
         })
         if (!putResp.ok) throw new Error(`PUT falhou (${putResp.status})`)
-        
-        enviados++
-        queuePool.push({
+
+        enviadosQueue.push({
           serial: item.serial,
           workorder_id: workorderId,
           windblade_id: parseInt(windbladeId, 10)
@@ -301,25 +299,38 @@ async function processarUploadCsv(
       } catch (e: any) {
         falhas.push({ arquivo: localName, erro: e.message })
         sendLog(`Falha ao enviar ${localName}: ${e.message}`, "error")
-      }
-
-      sendProgress(i + 1, total)
-
-      if (queuePool.length >= 30) {
-        await fetch(`${base}update-galleries-urls-queue`, {
-          method: 'POST',
-          headers: HEADERS,
-          body: JSON.stringify(queuePool)
-        })
-        queuePool = []
+      } finally {
+        completed++
+        sendProgress(completed, total)
       }
     }
 
-    if (queuePool.length > 0) {
+    // Pool de concorrência limitada: antes cada PUT esperava o anterior terminar (1 por
+    // vez), o que deixava o tempo total dominado pela latência de rede por requisição em
+    // vez do throughput real da conexão — pra centenas de fotos isso soma minutos. O
+    // Image Uploader oficial usa a mesma API mas sobe várias fotos ao mesmo tempo; 6
+    // workers é um valor conservador que não deve estourar limite de conexões do storage.
+    const CONCURRENCY = 6
+    let nextIndex = 0
+    async function worker(): Promise<void> {
+      while (nextIndex < presigns.length) {
+        const item = presigns[nextIndex++]
+        await uploadOne(item)
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, presigns.length) }, () => worker()))
+
+    const enviados = enviadosQueue.length
+
+    // Batching pro update de fila igual antes (grupos de 30) — só que agora depois que o
+    // pool termina, em vez de durante, já que várias uploads concluindo ao mesmo tempo
+    // tornaria o corte "a cada 30" da versão sequencial não-determinístico/arriscado de
+    // duplicar envio.
+    for (let i = 0; i < enviadosQueue.length; i += 30) {
       await fetch(`${base}update-galleries-urls-queue`, {
         method: 'POST',
         headers: HEADERS,
-        body: JSON.stringify(queuePool)
+        body: JSON.stringify(enviadosQueue.slice(i, i + 30))
       })
     }
 
