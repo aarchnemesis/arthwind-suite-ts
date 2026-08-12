@@ -13,6 +13,7 @@ export default function SnowAutomationModule({ D }) {
   const [localPhotosDir, setLocalPhotosDir] = useState('');
   const [incidentUrl, setIncidentUrl] = useState('');
   const [headless, setHeadless] = useState(false);
+  const [autoSubmit, setAutoSubmit] = useState(false);
   const [startRow, setStartRow] = useState('');
   const [endRow, setEndRow] = useState('');
   const [blades, setBlades] = useState([]);
@@ -24,6 +25,7 @@ export default function SnowAutomationModule({ D }) {
   const [logs, setLogs] = useState([]);
   const [result, setResult] = useState(null);
   const logsEndRef = useRef(null);
+
 
   useEffect(() => {
     const handleLog = (e) => {
@@ -134,9 +136,11 @@ export default function SnowAutomationModule({ D }) {
       headless,
       selectedBlades,
       localPhotosDir,
+      autoSubmit,
       ...(startRow ? { startRow: parseInt(startRow, 10) } : {}),
       ...(endRow ? { endRow: parseInt(endRow, 10) } : {}),
     };
+
 
     try {
       const res = await window.pywebview.api.snow_automation_run(excelPath, incidentUrl.trim(), options);
@@ -387,11 +391,18 @@ export default function SnowAutomationModule({ D }) {
           </div>
         </div>
 
-        {/* Headless */}
-        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: D.textSecond, cursor: 'pointer' }}>
-          <input type="checkbox" checked={headless} onChange={(e) => setHeadless(e.target.checked)} disabled={running} />
-          Rodar em segundo plano (sem mostrar o navegador)
-        </label>
+        {/* Headless & Submissão */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: D.textSecond, cursor: 'pointer' }}>
+            <input type="checkbox" checked={headless} onChange={(e) => setHeadless(e.target.checked)} disabled={running} />
+            Rodar em segundo plano (sem mostrar o navegador)
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: D.textSecond, cursor: 'pointer' }}>
+            <input type="checkbox" checked={autoSubmit} onChange={(e) => setAutoSubmit(e.target.checked)} disabled={running} />
+            Submeter formulário automaticamente (desativado = apenas preenche)
+          </label>
+        </div>
+
 
         {/* Botão de Run */}
         <button

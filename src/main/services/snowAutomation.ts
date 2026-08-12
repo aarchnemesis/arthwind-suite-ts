@@ -252,7 +252,81 @@ class DamageEntryFiller {
     }
   }
 
-  async fill(data: DamageReportRow, localPhotosDir?: string): Promise<void> {
+  private async addOptionalFields(optionText: string = 'SN_241'): Promise<void> {
+    const scope = this.getScope()
+    this.log(`    Preenchendo Optional fields: "${optionText}"`)
+
+    try {
+      // 1. Tenta localizar a caixa de combobox / dropdown de Optional fields ou Options
+      const optionsFieldCandidates = [
+        scope.locator('.select2-container').filter({ has: scope.getByText(/optional fields|options/i) }).locator('.select2-choice').first(),
+        scope.locator('div.form-group, .sc-form-field', { hasText: /optional fields|options/i }).locator('.select2-choice, .select2-container').first(),
+        scope.getByRole('combobox', { name: /optional fields|options/i }).first(),
+        scope.getByLabel(/optional fields|options/i, { exact: false }).first()
+      ]
+
+      let opened = false
+      for (const candidate of optionsFieldCandidates) {
+        try {
+          if (await candidate.isVisible({ timeout: 1200 }).catch(() => false)) {
+            await candidate.click({ force: true })
+            opened = true
+            break
+          }
+        } catch {
+          /* tenta próximo */
+        }
+      }
+
+      if (opened) {
+        await this.page.waitForTimeout(300)
+
+        const searchBox = scope
+          .locator('.select2-input, input.select2-search, input[role="combobox"]')
+          .last()
+          .or(scope.getByRole('textbox').last())
+
+        if (await searchBox.isVisible({ timeout: 1500 }).catch(() => false)) {
+          await searchBox.fill(optionText)
+          await this.page.waitForTimeout(300)
+        }
+
+        const optionLocator = scope
+          .locator('.select2-result-label', { hasText: optionText }).first()
+          .or(scope.locator('li.select2-result', { hasText: optionText }).first())
+          .or(scope.getByRole('option', { name: optionText }).first())
+          .or(scope.getByText(optionText, { exact: false }).first())
+
+        await optionLocator.click({ force: true }).catch(() => {})
+        await this.page.waitForTimeout(300)
+      }
+
+      // 2. Clicar no botão "Add"
+      const addBtnCandidates = [
+        scope.getByRole('button', { name: /^add$/i }),
+        scope.getByRole('button', { name: /adicionar/i }),
+        scope.locator('button, a.btn', { hasText: /^add$/i }),
+        scope.locator('button, a.btn', { hasText: /add/i })
+      ]
+
+      for (const addBtn of addBtnCandidates) {
+        try {
+          if (await addBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
+            await addBtn.click({ force: true })
+            this.log(`    ✓ Clicado no botão Add em Optional fields ("${optionText}")`)
+            await this.page.waitForTimeout(500)
+            break
+          }
+        } catch {
+          /* tenta próximo */
+        }
+      }
+    } catch (err: any) {
+      this.log(`    ⚠ Optional fields (${optionText}): ${err.message || err}`)
+    }
+  }
+
+  async fill(data: DamageReportRow, localPhotosDir?: string, autoSubmit: boolean = false): Promise<void> {
     this.log(
       `Preenchendo: ${data.bladeSerialNumber} | ${data.subComponent} | ${data.failureType} | DF ${data.dfDistanceStart}-${data.dfDistanceEnd}`
     )
@@ -280,44 +354,50 @@ class DamageEntryFiller {
     await this.fillText('Size (mm)', data.sizeMm)
     await this.fillText('Amount of Findings', data.amountOfFindings ?? 1)
 
+    // Preenche a caixa de Optional fields (opções: SN_241) e clica no botão Add
+    await this.addOptionalFields('SN_241')
 
     // Busca fotos locais geradas pelo Módulo 23 (_pic1.jpeg com polígono e _pic2.jpeg regional)
     const localPhotos = localPhotosDir ? findLocalPhotosForDamage(localPhotosDir, data) : []
     await this.uploadPhotos(data.photoUrls, localPhotos)
 
+    // Submissão do formulário: somente realizada se autoSubmit for true
+    if (autoSubmit) {
+      this.log(`  Submetendo formulário...`)
+      const scope = this.getScope()
+      const submitBtnLocators = [
+        scope.getByRole('button', { name: /^submit$/i }),
+        scope.getByRole('button', { name: /^save$/i }),
+        scope.getByRole('button', { name: /^insert$/i }),
+        scope.getByRole('button', { name: /^salvar$/i }),
+        scope.getByRole('button', { name: /submit|insert|salvar|gravar/i })
+      ]
 
-    // Botão de submissão do formulário: DEVE ser Submit/Save/Insert/Salvar,
-    // E NÃO o botão "Create Damage Entry" que abre um formulário novo.
-    const scope = this.getScope()
-    const submitBtnLocators = [
-      scope.getByRole('button', { name: /^submit$/i }),
-      scope.getByRole('button', { name: /^save$/i }),
-      scope.getByRole('button', { name: /^insert$/i }),
-      scope.getByRole('button', { name: /^salvar$/i }),
-      scope.getByRole('button', { name: /submit|insert|salvar|gravar/i })
-    ]
-
-    let submitted = false
-    for (const btn of submitBtnLocators) {
-      try {
-        if (await btn.isVisible({ timeout: 1500 }).catch(() => false)) {
-          await btn.click()
-          submitted = true
-          break
+      let submitted = false
+      for (const btn of submitBtnLocators) {
+        try {
+          if (await btn.isVisible({ timeout: 1500 }).catch(() => false)) {
+            await btn.click()
+            submitted = true
+            break
+          }
+        } catch {
+          /* tenta próximo */
         }
-      } catch {
-        /* tenta próximo */
       }
-    }
 
-    if (!submitted) {
-      const fallback = scope.getByRole('button', { name: /submit|save|insert|salvar/i }).first()
-      await fallback.click()
-    }
+      if (!submitted) {
+        const fallback = scope.getByRole('button', { name: /submit|save|insert|salvar/i }).first()
+        await fallback.click()
+      }
 
-    await this.page.waitForLoadState('networkidle').catch(() => {})
-    await this.page.waitForTimeout(1000)
+      await this.page.waitForLoadState('networkidle').catch(() => {})
+      await this.page.waitForTimeout(1000)
+    } else {
+      this.log(`  ✓ Formulário e fotos preenchidos! (Modo conferência ativo: não submetido automaticamente).`)
+    }
   }
+
 
 }
 
@@ -501,6 +581,7 @@ export interface RunAutomationOptions {
   endRow?: number // 1-based, inclusive
   selectedBlades?: string[] // Lista de seriais de pás selecionados para processar
   localPhotosDir?: string // Pasta local com as fotos geradas pelo Módulo 23 (contendo _pic1 e _pic2)
+  autoSubmit?: boolean // Se true, clica em Submit no formulário. Padrão: false.
 }
 
 
@@ -597,7 +678,8 @@ export async function runSnowDamageAutomation(
 
 
         const filler = new DamageEntryFiller(page, (m) => log(`  ${prefix} ${m}`))
-        await filler.fill(row, options.localPhotosDir)
+        await filler.fill(row, options.localPhotosDir, options.autoSubmit ?? false)
+
 
 
 
