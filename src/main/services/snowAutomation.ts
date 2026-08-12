@@ -828,42 +828,45 @@ export async function runSnowDamageAutomation(
           await page.goto(incidentUrl, { waitUntil: 'domcontentloaded' })
         }
 
-        // Espera o carregamento inicial da página e dos iFrames do ServiceNow
-        await page.waitForLoadState('domcontentloaded').catch(() => {})
-        await page.waitForTimeout(1000)
-
-        // Busca resiliente do botão "Create Damage Entry" com loop de retentativa (até 15s)
+        // Busca o botão "Create Damage Entry" na página principal ou em iFrames com até 10 tentativas
         let clickedAdd = false
-        const startTime = Date.now()
 
-        while (!clickedAdd && Date.now() - startTime < 15000) {
+        for (let attempt = 0; attempt < 10; attempt++) {
           const scopes = [page, ...page.frames()]
           for (const s of scopes) {
-            const btn = s
-              .getByRole('button', { name: /create damage entry|add damage entry|nova entrada|criar dano|new damage/i })
-              .or(s.getByRole('link', { name: /create damage entry|add damage entry|nova entrada|criar dano|new damage/i }))
-              .or(s.locator('button, a, span', { hasText: /create damage entry|add damage entry|nova entrada|criar dano/i }))
-              .first()
+            const locators = [
+              s.getByRole('button', { name: /create damage entry|add damage entry|nova entrada|criar dano|new damage/i }),
+              s.getByRole('link', { name: /create damage entry|add damage entry|nova entrada|criar dano|new damage/i }),
+              s.getByText(/create damage entry|add damage entry|nova entrada|criar dano/i).first()
+            ]
+            for (const loc of locators) {
+              try {
+                if (await loc.isVisible({ timeout: 800 }).catch(() => false)) {
+                  await loc.click({ force: true })
+                  clickedAdd = true
+                  log(`  ✓ Clicado em 'Create Damage Entry' (tentativa ${attempt + 1})`)
+                  break
+                }
 
-            if (await btn.isVisible().catch(() => false)) {
-              await btn.click({ force: true }).catch(() => {})
-              clickedAdd = true
-              break
+              } catch {
+                /* tenta próximo */
+              }
             }
+            if (clickedAdd) break
           }
-          if (!clickedAdd) {
-            await page.waitForTimeout(600)
-          }
+          if (clickedAdd) break
+          await page.waitForTimeout(1000)
         }
 
         if (!clickedAdd) {
-          // Fallback via seletor direto
+          // Fallback via clique direto no seletor genérico
           await page
             .locator('button, a', { hasText: /create damage entry|add damage entry/i })
             .first()
             .click({ force: true })
             .catch(() => {})
         }
+
 
 
         const activeScope = page.frames().find((f) => f.name() === 'gsft_main' || f.url().includes('.do')) || page
