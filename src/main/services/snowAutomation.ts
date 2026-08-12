@@ -737,6 +737,8 @@ export function buildLocalPhotosMap(localPhotosDir: string): Map<string, LocalPh
   const map = new Map<string, LocalPhotoPair>()
   if (!localPhotosDir || !fs.existsSync(localPhotosDir)) return map
 
+  const scannedDirs = new Set<string>()
+
   function scan(dir: string) {
     try {
       const items = fs.readdirSync(dir, { withFileTypes: true })
@@ -752,7 +754,7 @@ export function buildLocalPhotosMap(localPhotosDir: string): Map<string, LocalPh
 
           // Procura o S/N da pá no nome do arquivo ou nas pastas pai
           const shortSn = extractBladeSn(item.name).toLowerCase()
-          const dfMatch = lower.match(/df[\d\.\-]+/)
+          const dfMatch = lower.match(/df[\d\.\-_]+/)
           const dfKey = dfMatch ? dfMatch[0] : ''
 
           if (shortSn && dfKey) {
@@ -774,7 +776,25 @@ export function buildLocalPhotosMap(localPhotosDir: string): Map<string, LocalPh
     } catch {}
   }
 
-  scan(localPhotosDir)
+  function scanWithParent(dir: string) {
+    if (!dir || !fs.existsSync(dir) || scannedDirs.has(dir)) return
+    scannedDirs.add(dir)
+    scan(dir)
+
+    const parent = path.dirname(dir)
+    if (parent && fs.existsSync(parent) && !scannedDirs.has(parent)) {
+      const candidates = ['Videos', 'Vídeos', 'videos', 'vídeos', 'Fotos', 'fotos']
+      for (const cand of candidates) {
+        const candPath = path.join(parent, cand)
+        if (fs.existsSync(candPath) && !scannedDirs.has(candPath)) {
+          scannedDirs.add(candPath)
+          scan(candPath)
+        }
+      }
+    }
+  }
+
+  scanWithParent(localPhotosDir)
   return map
 }
 
@@ -785,8 +805,20 @@ export function findLocalPhotosFromMap(photosMap: Map<string, LocalPhotoPair>, d
   const df1 = `df${data.dfDistanceStart}-${data.dfDistanceEnd}`.toLowerCase()
   const df2 = `df${data.dfDistanceStart}`.toLowerCase()
 
-  const entry = photosMap.get(`${shortSn}_${df1}`) || photosMap.get(`${shortSn}_${df2}`)
   const result: string[] = []
+
+  // Tenta chave exata primeiro
+  let entry = photosMap.get(`${shortSn}_${df1}`) || photosMap.get(`${shortSn}_${df2}`)
+
+  // Se for linha de vídeo ou não encontrou por DF exato, busca qualquer chave da mesma pá contendo vídeo
+  if (!entry && (data.dfDistanceStart === 45 && data.dfDistanceEnd === 50)) {
+    for (const [k, val] of photosMap.entries()) {
+      if (k.startsWith(`${shortSn}_`) && val.videoPath) {
+        entry = val
+        break
+      }
+    }
+  }
 
   if (entry) {
     if (entry.pic1Path) result.push(entry.pic1Path)
@@ -806,6 +838,7 @@ export function findLocalPhotosForDamage(localPhotosDir: string, data: DamageRep
   const pic1Files: string[] = []
   const pic2Files: string[] = []
   const videoFiles: string[] = []
+  const scannedDirs = new Set<string>()
 
   function scan(dir: string) {
     try {
@@ -852,15 +885,31 @@ export function findLocalPhotosForDamage(localPhotosDir: string, data: DamageRep
                 videoFiles.push(full)
               }
             }
-
           }
-
         }
       }
     } catch {}
   }
 
-  scan(localPhotosDir)
+  function scanWithParent(dir: string) {
+    if (!dir || !fs.existsSync(dir) || scannedDirs.has(dir)) return
+    scannedDirs.add(dir)
+    scan(dir)
+
+    const parent = path.dirname(dir)
+    if (parent && fs.existsSync(parent) && !scannedDirs.has(parent)) {
+      const candidates = ['Videos', 'Vídeos', 'videos', 'vídeos', 'Fotos', 'fotos']
+      for (const cand of candidates) {
+        const candPath = path.join(parent, cand)
+        if (fs.existsSync(candPath) && !scannedDirs.has(candPath)) {
+          scannedDirs.add(candPath)
+          scan(candPath)
+        }
+      }
+    }
+  }
+
+  scanWithParent(localPhotosDir)
 
   const result: string[] = []
   if (pic1Files.length > 0) result.push(pic1Files[0])
@@ -869,6 +918,7 @@ export function findLocalPhotosForDamage(localPhotosDir: string, data: DamageRep
 
   return result
 }
+
 
 // ─── Entry point ──────────────────────────────────────────────────────────
 
@@ -1110,9 +1160,14 @@ export async function runSnowDamageAutomation(
         await activeScope.getByLabel('Blade serial number', { exact: false }).first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {})
 
         // Cruza a linha atual com o mapa pré-indexado de fotos
-        const localPhotos = options.localPhotosDir
+        let localPhotos = options.localPhotosDir
           ? findLocalPhotosFromMap(photosMap, row)
           : []
+
+        if (localPhotos.length === 0 && options.localPhotosDir) {
+          localPhotos = findLocalPhotosForDamage(options.localPhotosDir, row)
+        }
+
 
         const filler = new DamageEntryFiller(page, (m) => log(`  ${prefix} ${m}`))
         await filler.fill(row, localPhotos, autoSubmit)
