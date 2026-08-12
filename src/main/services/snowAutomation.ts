@@ -876,15 +876,20 @@ export function findLocalPhotosForDamage(localPhotosDir: string, data: DamageRep
               if (lower.includes('ps') && areaCode !== 'PS') continue
               if (lower.includes('ss') && areaCode !== 'SS') continue
 
-              const targetName = `B${shortSn}_${secCode}_${areaCode}_DF45-50.mp4`
-              const dst = path.join(os.tmpdir(), targetName)
-              try {
-                fs.copyFileSync(full, dst)
-                videoFiles.push(dst)
-              } catch {
+              const targetName = `B${shortSn}_${secCode}_${areaCode}_DF45_DF50.mp4`
+              if (path.basename(full).toLowerCase() === targetName.toLowerCase()) {
                 videoFiles.push(full)
+              } else {
+                const dst = path.join(os.tmpdir(), targetName)
+                try {
+                  fs.copyFileSync(full, dst)
+                  videoFiles.push(dst)
+                } catch {
+                  videoFiles.push(full)
+                }
               }
             }
+
           }
         }
       }

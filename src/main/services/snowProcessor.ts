@@ -919,7 +919,8 @@ export async function processSnowExcel(
     ].join('\n')
 
     for (const v of videoVariants) {
-      const videoFileName = `B${bInfo.shortSn}_${v.secCode}_${v.areaCode}_DF45-50.mp4`
+      const videoFileName = `B${bInfo.shortSn}_${v.secCode}_${v.areaCode}_DF45_DF50.mp4`
+
 
       outWs.addRow([
         bInfo.fullBladeSerial,         // A — Blade serial number
