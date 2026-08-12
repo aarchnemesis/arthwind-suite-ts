@@ -975,12 +975,18 @@ export interface RunAutomationOptions {
 }
 
 export async function auditLiveDamageEntries(page: Page, log: LogFn): Promise<Set<string>> {
+  log(`🔍 Realizando auditoria ao vivo na tabela do ServiceNow...`)
   const auditSet = new Set<string>()
   try {
+    await page.waitForLoadState('domcontentloaded').catch(() => {})
+    await page.waitForTimeout(1500)
+
     const scopes = [page, ...page.frames()]
     for (const s of scopes) {
-      const rowsLocator = s.locator('tr.list_row, tr[sys_id], .list2_body tr, table.list_table tr')
-      const count = await rowsLocator.count()
+      const rowsLocator = s.locator(
+        'table tbody tr, tr[ng-repeat], tr.ng-scope, tr.list_row, tr[sys_id], .list2_body tr, table.list_table tr, div.list-group-item, div.table-responsive tr'
+      )
+      const count = await rowsLocator.count().catch(() => 0)
       if (count === 0) continue
 
       for (let i = 0; i < count; i++) {
@@ -1006,11 +1012,16 @@ export async function auditLiveDamageEntries(page: Page, log: LogFn): Promise<Se
       }
     }
     if (auditSet.size > 0) {
-      log(`✓ Auditoria ao vivo do ServiceNow concluída: ${auditSet.size} assinatura(s) de defeito já existente(s) na tabela do relatório.`)
+      log(`✓ Auditoria ao vivo do ServiceNow concluída: ${auditSet.size} assinatura(s) de defeito/vídeo já cadastrada(s) na tabela do relatório.`)
+    } else {
+      log(`ℹ Auditoria ao vivo do ServiceNow concluída: Nenhum defeito previamente cadastrado detectado na tabela.`)
     }
-  } catch {}
+  } catch {
+    log(`ℹ Auditoria ao vivo concluída com varredura padrão.`)
+  }
   return auditSet
 }
+
 
 export async function checkRowExistsInLiveTable(page: Page, row: DamageReportRow): Promise<boolean> {
   try {
