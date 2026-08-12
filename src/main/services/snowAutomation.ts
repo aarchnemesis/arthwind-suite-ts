@@ -980,6 +980,10 @@ export async function auditLiveDamageEntries(page: Page, log: LogFn): Promise<Se
   try {
     await page.waitForLoadState('domcontentloaded').catch(() => {})
 
+    // Rola até o final da página para forçar o carregamento dinâmico de widgets Angular inferiores (relatórios vinculados)
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {})
+    await page.waitForTimeout(1000)
+
     // Aguarda ativamente o widget Angular da tabela de defeitos carregar na página
     for (let wait = 0; wait < 12; wait++) {
       const scopes = [page, ...page.frames()]
@@ -1020,9 +1024,10 @@ export async function auditLiveDamageEntries(page: Page, log: LogFn): Promise<Se
         const areaMatch = text.match(/(?:^|[\s_])(ps|ss)(?:[\s_]|$)/i)
         const areaCode = areaMatch ? areaMatch[1].toLowerCase() : ''
 
-        // Procura números DF no texto da linha (ex: 45, 50, 53.2)
-        const dfNumbers = text.match(/\b\d{1,3}(?:\.\d+)?\b/g) || []
-        for (const dfVal of dfNumbers) {
+        // Procura números DF com ponto ou vírgula no texto da linha (ex: 40.5, 40,5, 45, 50, 53.2)
+        const dfNumbers = text.match(/\b\d{1,3}(?:[.,]\d+)?\b/g) || []
+        for (const rawDf of dfNumbers) {
+          const dfVal = rawDf.replace(',', '.')
           auditSet.add(`${shortSn}_df${dfVal}`)
           if (areaCode) {
             auditSet.add(`${shortSn}_${secCode}_${areaCode}_df${dfVal}`)
@@ -1047,6 +1052,11 @@ export async function checkRowExistsInLiveTable(page: Page, row: DamageReportRow
     const scopes = [page, ...page.frames()]
     const shortSn = extractBladeSn(row.bladeSerialNumber)
 
+    const dfDot = String(row.dfDistanceStart).trim().replace(',', '.')
+    const dfComma = String(row.dfDistanceStart).trim().replace('.', ',')
+
+    const cleanSubComp = row.subComponent.replace(/^blade\s+/i, '').trim()
+
     for (const s of scopes) {
       const rowsLocator = s.locator(
         'table tbody tr, tr[ng-repeat], tr.ng-scope, tr.list_row, tr[sys_id], .list2_body tr, table.list_table tr, div.list-group-item, div.table-responsive tr'
@@ -1058,8 +1068,8 @@ export async function checkRowExistsInLiveTable(page: Page, row: DamageReportRow
           const text = await rowsLocator.nth(i).textContent().catch(() => '')
           if (!text) continue
 
-          const hasSn = !shortSn || text.includes(shortSn)
-          const hasSubComp = text.includes(row.subComponent) || (row.subComponent.includes('Shell') && text.includes('Shell'))
+          const hasSn = !shortSn || text.includes(shortSn) || text.includes(row.bladeSerialNumber)
+          const hasSubComp = text.includes(row.subComponent) || text.includes(cleanSubComp) || (row.subComponent.includes('Shell') && text.includes('Shell'))
 
           let hasMatch = false
           if (row.dfDistanceStart === 45 && row.dfDistanceEnd === 50) {
@@ -1067,7 +1077,7 @@ export async function checkRowExistsInLiveTable(page: Page, row: DamageReportRow
             const hasArea = text.includes(row.bladeArea)
             hasMatch = hasSn && hasSubComp && (text.includes('45') || text.includes('50')) && hasSec && hasArea
           } else {
-            const hasDf = text.includes(String(row.dfDistanceStart))
+            const hasDf = text.includes(dfDot) || text.includes(dfComma)
             hasMatch = hasSn && hasSubComp && hasDf
           }
 
@@ -1080,8 +1090,8 @@ export async function checkRowExistsInLiveTable(page: Page, row: DamageReportRow
       // Fallback: varredura no texto completo do body caso a tabela use uma estrutura customizada
       const bodyText = await s.locator('body').textContent().catch(() => '')
       if (bodyText) {
-        const hasSn = !shortSn || bodyText.includes(shortSn)
-        const hasSubComp = bodyText.includes(row.subComponent)
+        const hasSn = !shortSn || bodyText.includes(shortSn) || bodyText.includes(row.bladeSerialNumber)
+        const hasSubComp = bodyText.includes(row.subComponent) || bodyText.includes(cleanSubComp)
         if (row.dfDistanceStart === 45 && row.dfDistanceEnd === 50) {
           const hasSec = bodyText.includes(row.bladeSection)
           const hasArea = bodyText.includes(row.bladeArea)
@@ -1089,8 +1099,8 @@ export async function checkRowExistsInLiveTable(page: Page, row: DamageReportRow
             return true
           }
         } else {
-          const dfStr = `DF ${row.dfDistanceStart}`
-          if (hasSn && hasSubComp && (bodyText.includes(dfStr) || bodyText.includes(String(row.dfDistanceStart)))) {
+          const hasDf = bodyText.includes(dfDot) || bodyText.includes(dfComma) || bodyText.includes(`DF ${dfDot}`) || bodyText.includes(`DF ${dfComma}`)
+          if (hasSn && hasSubComp && hasDf) {
             return true
           }
         }
