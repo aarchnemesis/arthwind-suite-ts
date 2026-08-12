@@ -115,31 +115,54 @@ class DamageEntryFiller {
     if (!optionText) return
     const scope = this.getScope()
 
-    // .first() é ESSENCIAL para evitar a violação de strict mode do Playwright no Select2 do ServiceNow
-    // (o widget renderiza focusser, searchbox, listbox e select nativo compartilhando a mesma label)
-    const field = scope
-      .getByRole('combobox', { name: fieldLabel })
-      .first()
-      .or(scope.getByLabel(fieldLabel, { exact: false }).first())
+    // No Select2 do ServiceNow, o elemento de foco (.select2-focusser) fica sob o container visível (<a class="select2-choice">).
+    // O clique direto no focusser causa "intercepts pointer events". Usar { force: true } no container visível resolve 100%.
+    let opened = false
 
-    await field.waitFor({ state: 'visible', timeout: 10000 })
-    await field.click()
+    // 1. Tentar localizar o container visível do Select2 associado à label
+    const openCandidates = [
+      // Container pai do Select2 que contém o label ou a classe select2-choice
+      scope.locator('.select2-container').filter({ has: scope.getByText(fieldLabel, { exact: false }) }).locator('.select2-choice').first(),
+      scope.locator('div.form-group', { hasText: fieldLabel }).locator('.select2-choice, .select2-container').first(),
+      scope.locator('.select2-choice').first(),
+      scope.getByRole('combobox', { name: fieldLabel }).first(),
+      scope.getByLabel(fieldLabel, { exact: false }).first()
+    ]
 
-    // Tenta digitar na caixa de busca do Select2 se aparecer
+    for (const candidate of openCandidates) {
+      try {
+        if (await candidate.isVisible({ timeout: 1200 }).catch(() => false)) {
+          await candidate.click({ force: true })
+          opened = true
+          break
+        }
+      } catch {
+        /* tenta próximo */
+      }
+    }
+
+    if (!opened) {
+      await scope.getByLabel(fieldLabel, { exact: false }).first().click({ force: true }).catch(() => {})
+    }
+
+    await this.page.waitForTimeout(300)
+
+    // 2. Tenta digitar na caixa de busca do Select2 se aparecer (.select2-input)
     const searchBox = scope
       .locator('.select2-input, input.select2-search, input[role="combobox"]')
       .last()
       .or(scope.getByRole('textbox').last())
 
-    if (await searchBox.isVisible({ timeout: 1000 }).catch(() => false)) {
+    if (await searchBox.isVisible({ timeout: 1500 }).catch(() => false)) {
       await searchBox.fill(optionText)
-      await this.page.waitForTimeout(250) // filtro client-side
+      await this.page.waitForTimeout(300) // filtro client-side
     }
 
-    // Seletores em cascata de fallback pra cobrir a estrutura Select2 e papéis ARIA do ServiceNow
+    // 3. Seletores em cascata de fallback pra cobrir a estrutura Select2 e papéis ARIA do ServiceNow
     const optionLocators = [
       scope.locator('.select2-result-label', { hasText: optionText }).first(),
       scope.locator('li.select2-result', { hasText: optionText }).first(),
+      scope.locator('.select2-results li', { hasText: optionText }).first(),
       scope.getByRole('option', { name: optionText, exact: true }).first(),
       scope.getByRole('option', { name: optionText }).first(),
       scope.locator('li', { hasText: optionText }).first(),
@@ -151,7 +174,7 @@ class DamageEntryFiller {
     for (const locator of optionLocators) {
       try {
         if (await locator.isVisible({ timeout: 1500 }).catch(() => false)) {
-          await locator.click()
+          await locator.click({ force: true })
           selected = true
           break
         }
@@ -162,10 +185,7 @@ class DamageEntryFiller {
 
     if (!selected) {
       // Tenta um clique forçado caso o elemento esteja oculto por overlay
-      const fallback = scope.getByRole('option', { name: optionText, exact: true }).first()
-      await fallback.click({ timeout: 5000 }).catch(async () => {
-        await scope.getByText(optionText, { exact: true }).first().click({ force: true })
-      })
+      await scope.getByText(optionText, { exact: true }).first().click({ force: true }).catch(() => {})
     }
   }
 
