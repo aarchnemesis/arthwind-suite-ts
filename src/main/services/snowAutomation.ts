@@ -109,26 +109,39 @@ class DamageEntryFiller {
     return mainFrame || this.page
   }
 
-  /** Widget de combobox custom do ServiceNow (não é <select> nativo) — clica pra
+  /** Widget de combobox custom do ServiceNow (Select2 / sn-select) — clica pra
    * abrir, filtra pela caixa de busca se ela aparecer, clica na opção com fallbacks. */
   private async selectFromComboBox(fieldLabel: string, optionText: string): Promise<void> {
     if (!optionText) return
     const scope = this.getScope()
-    const field = scope.getByLabel(fieldLabel, { exact: false })
+
+    // .first() é ESSENCIAL para evitar a violação de strict mode do Playwright no Select2 do ServiceNow
+    // (o widget renderiza focusser, searchbox, listbox e select nativo compartilhando a mesma label)
+    const field = scope
+      .getByRole('combobox', { name: fieldLabel })
+      .first()
+      .or(scope.getByLabel(fieldLabel, { exact: false }).first())
+
     await field.waitFor({ state: 'visible', timeout: 10000 })
     await field.click()
 
-    // Tenta digitar na caixa de busca se aparecer
-    const searchBox = scope.getByRole('textbox').last()
-    if (await searchBox.isVisible().catch(() => false)) {
+    // Tenta digitar na caixa de busca do Select2 se aparecer
+    const searchBox = scope
+      .locator('.select2-input, input.select2-search, input[role="combobox"]')
+      .last()
+      .or(scope.getByRole('textbox').last())
+
+    if (await searchBox.isVisible({ timeout: 1000 }).catch(() => false)) {
       await searchBox.fill(optionText)
       await this.page.waitForTimeout(250) // filtro client-side
     }
 
-    // Seletores em cascata de fallback pra cobrir diferentes papéis ARIA e estruturas DOM do ServiceNow
+    // Seletores em cascata de fallback pra cobrir a estrutura Select2 e papéis ARIA do ServiceNow
     const optionLocators = [
-      scope.getByRole('option', { name: optionText, exact: true }),
-      scope.getByRole('option', { name: optionText }),
+      scope.locator('.select2-result-label', { hasText: optionText }).first(),
+      scope.locator('li.select2-result', { hasText: optionText }).first(),
+      scope.getByRole('option', { name: optionText, exact: true }).first(),
+      scope.getByRole('option', { name: optionText }).first(),
       scope.locator('li', { hasText: optionText }).first(),
       scope.locator('div', { hasText: optionText }).first(),
       scope.getByText(optionText, { exact: true }).first()
@@ -149,7 +162,7 @@ class DamageEntryFiller {
 
     if (!selected) {
       // Tenta um clique forçado caso o elemento esteja oculto por overlay
-      const fallback = scope.getByRole('option', { name: optionText, exact: true })
+      const fallback = scope.getByRole('option', { name: optionText, exact: true }).first()
       await fallback.click({ timeout: 5000 }).catch(async () => {
         await scope.getByText(optionText, { exact: true }).first().click({ force: true })
       })
@@ -158,7 +171,7 @@ class DamageEntryFiller {
 
   private async fillText(fieldLabel: string, value: string | number): Promise<void> {
     const scope = this.getScope()
-    const field = scope.getByLabel(fieldLabel, { exact: false })
+    const field = scope.getByLabel(fieldLabel, { exact: false }).first()
     await field.waitFor({ state: 'visible', timeout: 10000 })
     await field.fill(String(value))
   }
@@ -387,7 +400,8 @@ export async function runSnowDamageAutomation(
 
         // Aguarda a abertura do formulário (espera o campo "Blade serial number" ficar disponível)
         const activeScope = page.frames().find((f) => f.name() === 'gsft_main' || f.url().includes('.do')) || page
-        await activeScope.getByLabel('Blade serial number', { exact: false }).waitFor({ state: 'visible', timeout: 12000 }).catch(() => {})
+        await activeScope.getByLabel('Blade serial number', { exact: false }).first().waitFor({ state: 'visible', timeout: 12000 }).catch(() => {})
+
 
         const filler = new DamageEntryFiller(page, (m) => log(`  ${prefix} ${m}`))
         await filler.fill(row)
