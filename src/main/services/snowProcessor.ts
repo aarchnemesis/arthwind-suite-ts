@@ -5,7 +5,7 @@ import http from 'http'
 import os from 'os'
 import ExcelJS from 'exceljs'
 import sharp from 'sharp'
-import { equirectPolygonToPinhole, renderEquirectPinhole } from './polygonUtils'
+import { equirectPolygonToPinhole, renderEquirectPinhole, equirectPolygonCenter } from './polygonUtils'
 import { getBladeInfo } from './bladeSets'
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
@@ -93,6 +93,107 @@ export class SnowMappings {
     if (s === 'CE') return 50
     if (s === 'TE') return 100
     return ''
+  }
+
+  // Fonte equirretangular fixa do Arthnex — mesma premissa validada na
+  // correção de posicionamento dos polígonos (85 pontos de calibração).
+  private static readonly EQUIRECT_SRC_WIDTH = 3840
+  // Abaixo disso a foto é GoPro fixa da raiz — a coordenada é pixel nativo,
+  // não equirretangular, então não dá pra calcular ângulo a partir dela.
+  private static readonly ROOT_LOCATION_THRESHOLD_M = 11
+
+  // Âncoras reais (Section+Side → zonas da tabela do cliente, com o ângulo
+  // onde cada uma foi confirmada). Extraídas de VSR05-06 pás 377/404/408 —
+  // ver docs/pd-from-coordinate.md. Cada zona SÓ entra aqui com âncora(s)
+  // real(is) confirmada(s); zonas sem referência ficam de fora (tratadas à
+  // parte, sem inventar um ângulo que não medimos).
+  //
+  // LE|SS: 3 referências independentes (ângulos bem diferentes entre si, de
+  // 101.9° a 140.7°) sempre confirmam PD 10 — a única zona possível pra esse
+  // lado na tabela do cliente (SS, transition to MG, 10-15%), sem depender
+  // do ângulo dentro dessa faixa.
+  //
+  // Section 2/SS tem uma segunda zona possível na tabela do cliente
+  // ("transition to MG", 40-45%) sem âncora real — busca em outras turbinas
+  // não trouxe uma (defeitos reais se repetem quase sempre nos mesmos
+  // pontos, a amostragem não cresce só olhando mais dados). Tende a ficar
+  // assim por um bom tempo; se algum dia aparecer um defeito real nessa
+  // zona, basta adicionar a entrada aqui que a escolha por proximidade
+  // passa a valer sozinha (pickNearestByAngle já suporta N âncoras).
+  private static readonly PD_ANCHORS: Record<string, { angleDeg: number; pd: number }[]> = {
+    'LE|SS': [
+      { angleDeg: 101.9, pd: 10 },
+      { angleDeg: 104.9, pd: 10 },
+      { angleDeg: 140.7, pd: 10 },
+    ],                                          // única zona possível: →MG (10-15%)
+    'CE|SS': [{ angleDeg: 41.5, pd: 55 }],       // →TEG (55-60%); →MG (40-45%) ainda sem âncora
+    'CE|PS': [{ angleDeg: 79.4, pd: 55 }],       // única zona possível: →TEG (55-60%)
+  }
+
+  private static pickNearestByAngle(
+    angleDeg: number,
+    anchors: { angleDeg: number; pd: number }[]
+  ): number {
+    let best = anchors[0]
+    let bestDelta = Math.abs(angleDeg - best.angleDeg)
+    for (const a of anchors.slice(1)) {
+      const delta = Math.abs(angleDeg - a.angleDeg)
+      if (delta < bestDelta) { best = a; bestDelta = delta }
+    }
+    return best.pd
+  }
+
+  /**
+   * Profile Depth (%) a partir da posição angular real do polígono na bolha
+   * equirretangular, em vez do valor fixo por região (getProfile). Calibrado
+   * com pontos de referência reais (VSR05-06, pás 377/404/408) cruzados com a
+   * especificação de PD% por posição do cliente — ver docs/pd-from-coordinate.md
+   * pro estudo completo (inclusive as zonas que ainda não têm referência real
+   * e por enquanto usam o valor mais próximo já validado).
+   *
+   * Cai no valor fixo antigo (getProfile) quando: Location < 11m (foto GoPro
+   * da raiz — coordenada não é equirretangular), polígono inválido, Section
+   * 3/TE (fora de escopo, "não trabalhamos"), ou Section 1/PS (2 zonas
+   * possíveis na tabela do cliente, sem nenhuma referência real ainda).
+   */
+  static getProfileFromCoordinates(
+    section: string,
+    side: string,
+    component: string,
+    coordinatesJson: string,
+    locationM: number
+  ): number | string {
+    const s = (section || '').trim().toUpperCase()
+    const c = (component || '').trim().toUpperCase()
+
+    // MSW (Main Shear Web / componente "MAIN WEB") tem PD fixo — único caso
+    // da tabela do cliente que não depende de seção, lado nem ângulo.
+    if (c === 'MAIN WEB') return 30
+
+    // Section 3/TE não é trabalhado hoje — mantém o valor antigo.
+    if (s !== 'LE' && s !== 'CE') return this.getProfile(section)
+
+    const points = parseCoordinates(coordinatesJson)
+    const isRootPhoto = locationM < this.ROOT_LOCATION_THRESHOLD_M
+    if (isRootPhoto || points.length < 3) {
+      return this.getProfile(section)
+    }
+
+    const sd = (side || '').trim().toUpperCase()
+    // Mesmo default de getBladeArea: qualquer side que não seja PS cai em SS.
+    const isPS = sd === 'PS'
+
+    // Section 1/PS: 2 zonas possíveis (edge 0-5%, →MG 10-15%) sem nenhuma
+    // referência real ainda — sem âncora, mantém o valor antigo.
+    if (s === 'LE' && isPS) return this.getProfile(section)
+
+    const anchors = this.PD_ANCHORS[`${s}|${isPS ? 'PS' : 'SS'}`]
+    if (!anchors || anchors.length === 0) return this.getProfile(section)
+
+    const center = equirectPolygonCenter(points, this.EQUIRECT_SRC_WIDTH)
+    const angleDeg = ((center.x / this.EQUIRECT_SRC_WIDTH) * 2 - 1) * 180
+
+    return this.pickNearestByAngle(angleDeg, anchors)
   }
 
   static getBladeSection(section: string): string {
@@ -680,7 +781,9 @@ export async function processSnowExcel(
     const failureType   = SnowMappings.getFailure(origFail)
     const damageDesc    = SnowMappings.getDamageDescription(bladeSn, origFail)
     const dfEnd         = SnowMappings.getDfEnd(dfStart, sizeMm)
-    const profileDepth  = SnowMappings.getProfile(section)
+    const profileDepth  = SnowMappings.getProfileFromCoordinates(
+      section, side, component, polygonRaw ? String(polygonRaw) : '', dfStart
+    )
     const bladeSection  = SnowMappings.getBladeSection(section)
     const bladeSubsec   = SnowMappings.getBladeSubsection(component)
     const bladeArea     = SnowMappings.getBladeArea(component, side)

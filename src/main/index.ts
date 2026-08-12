@@ -52,6 +52,11 @@ import { substituirVideos360 } from './services/videoReplacer'
 import { enviarVideosDrive } from './services/videoUploader'
 import { batchStitchDirectory } from './services/batch360Stitcher'
 import { processSnowExcel, processSnowExcelBatch } from './services/snowProcessor'
+import {
+  openServiceNowForLogin,
+  closeServiceNowSession,
+  runSnowDamageAutomation
+} from './services/snowAutomation'
 
 // Configuration Helpers
 function getConfigPath(): string {
@@ -472,6 +477,29 @@ app.whenReady().then(() => {
   ipcMain.handle('snow_process_excel_batch', async (event, excelPaths: string[], outputDir: string) => {
     return processSnowExcelBatch(excelPaths, outputDir, event.sender)
   })
+
+  // ─── SNOW Automation (preenchimento do Damage Report Entry) ──────────────────
+  ipcMain.handle('snow_automation_login', async (_event, url: string) => {
+    return openServiceNowForLogin(url)
+  })
+
+  ipcMain.handle('snow_automation_close', async () => {
+    return closeServiceNowSession()
+  })
+
+  ipcMain.handle(
+    'snow_automation_run',
+    async (
+      event,
+      excelPath: string,
+      incidentUrl: string,
+      options: { headless?: boolean; startRow?: number; endRow?: number }
+    ) => {
+      return runSnowDamageAutomation(excelPath, incidentUrl, options, (msg: string) => {
+        event.sender.send('snow_automation_log', { msg })
+      })
+    }
+  )
 
   createWindow()
 

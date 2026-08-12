@@ -55,7 +55,10 @@ const ipcMethods = [
   'carregar_fotos_reconstruir_sync',
   'batch_360_stitch',
   'snow_process_excel',
-  'snow_process_excel_batch'
+  'snow_process_excel_batch',
+  'snow_automation_login',
+  'snow_automation_close',
+  'snow_automation_run'
 ]
 
 const api: Record<string, (...args: any[]) => Promise<any>> = {}
@@ -76,7 +79,8 @@ const events = [
   'gopro_raw_analise',
   'batch_stitch_log',
   'snow_progress',
-  'snow_batch_status'
+  'snow_batch_status',
+  'snow_automation_log'
 ]
 
 for (const eventName of events) {
