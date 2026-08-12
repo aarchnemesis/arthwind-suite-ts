@@ -1258,13 +1258,16 @@ export async function runSnowDamageAutomation(
         await formPage.bringToFront().catch(() => {})
 
 
+        // Verifica se a aba atual realmente é o formulário (e não a página do relatório principal Inspection Report)
         const checkFormReady = async (p: Page): Promise<boolean> => {
+          const isFormUrl = p.url().includes('u_damage_report_entry') || p.url().includes('damage_entry')
           const scopes = [p, ...p.frames()]
           for (const s of scopes) {
             try {
-              const hasLabel = await s.getByText(/blade serial number|sub component|failure type/i).first().isVisible({ timeout: 500 }).catch(() => false)
-              const hasSelect2 = await s.locator('.select2-container, .select2-choice').first().isVisible({ timeout: 500 }).catch(() => false)
-              if (hasLabel || hasSelect2) return true
+              const hasSubComponent = await s.getByText(/^sub component$/i).first().isVisible({ timeout: 400 }).catch(() => false)
+              const hasFailureType = await s.getByText(/failure type|type of failure/i).first().isVisible({ timeout: 400 }).catch(() => false)
+              const hasInsideOutside = await s.getByText(/inside\/outside/i).first().isVisible({ timeout: 400 }).catch(() => false)
+              if (isFormUrl || hasSubComponent || hasFailureType || hasInsideOutside) return true
             } catch {}
           }
           return false
@@ -1272,15 +1275,36 @@ export async function runSnowDamageAutomation(
 
         let isFormReady = await checkFormReady(formPage)
         if (!isFormReady) {
-          await formPage.waitForTimeout(2500)
+          // Aguarda até 5 segundos caso o ServiceNow esteja renderizando o formulário
+          for (let wait = 0; wait < 10; wait++) {
+            await formPage.waitForTimeout(500)
+            isFormReady = await checkFormReady(formPage)
+            if (isFormReady) break
+          }
+        }
+
+        // Se ainda assim não abriu o formulário e a tela continua no Inspection Report, tenta clicar novamente no botão Add Damage Entry
+        if (!isFormReady) {
+          log(`  ⚠ Formulário não abriu na 1ª tentativa. Tentando clicar novamente em 'Add Damage Entry'...`)
+          const scopes = [formPage, ...formPage.frames()]
+          for (const s of scopes) {
+            const loc = s.locator('button, a', { hasText: /add damage entry|create damage entry/i }).first()
+            if (await loc.isVisible({ timeout: 500 }).catch(() => false)) {
+              await loc.scrollIntoViewIfNeeded().catch(() => {})
+              await loc.click({ force: true, timeout: 3000 }).catch(() => {})
+              break
+            }
+          }
+          await formPage.waitForTimeout(2000)
           isFormReady = await checkFormReady(formPage)
         }
 
         if (!isFormReady) {
-          log(`  ⚠ O formulário de cadastro não abriu na aba. Recarregando página do relatório...`)
+          log(`  ⚠ O formulário de cadastro não abriu na aba de destino. Recarregando página do relatório...`)
           await formPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
           throw new Error("A tela 'Create Damage Entry' não carregou a tempo.")
         }
+
 
         // Cruza a linha atual com o mapa pré-indexado de fotos
         let localPhotos = options.localPhotosDir
