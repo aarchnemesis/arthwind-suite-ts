@@ -1186,47 +1186,43 @@ export async function runSnowDamageAutomation(
           context = await getContext(options.headless ?? false)
         }
 
-        let page: Page
-        if (autoSubmit) {
-          page = context.pages().find((p) => !p.isClosed()) || (await context.newPage())
-        } else {
-          page = (i === 0)
-            ? (context.pages().find((p) => !p.isClosed()) || (await context.newPage()))
-            : (await context.newPage())
+        // Identifica a página do relatório principal (Inspection Report)
+        let parentPage = context.pages().find((p) => !p.isClosed() && p.url().includes(incidentUrl.split('?')[0]))
+        if (!parentPage) {
+          parentPage = context.pages().find((p) => !p.isClosed()) || (await context.newPage())
+          await parentPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
         }
 
-        await page.bringToFront().catch(() => {})
-
-        // Se a página não estiver no relatório, navega
-        if (!page.url().includes(incidentUrl.split('?')[0])) {
-          await page.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
-        }
+        await parentPage.bringToFront().catch(() => {})
 
         // Checagem ao vivo na tabela Damage Report Entries do ServiceNow
-        const existsInSnow = await checkRowExistsInLiveTable(page, row)
+        const existsInSnow = await checkRowExistsInLiveTable(parentPage, row)
         if (existsInSnow) {
           log(`  ℹ [SNOW Live Audit] Entrada para ${row.bladeSerialNumber} (${row.subComponent} DF ${row.dfDistanceStart}-${row.dfDistanceEnd}) já cadastrada na tabela do ServiceNow. Pulando...`)
           if (autoSubmit) markRowSubmitted(buildRowKey(incidentUrl, row))
           continue
         }
 
-        // Busca o botão "Create Damage Entry" na página principal ou em iFrames com até 10 tentativas
-        let clickedAdd = false
+        // Clica no botão "Add Damage Entry" ou "Create Damage Entry" e captura a nova aba de formulário (se abrir em popup)
+        const popupPromise = context.waitForEvent('page', { timeout: 4000 }).catch(() => null)
 
-        for (let attempt = 0; attempt < 10; attempt++) {
-          const scopes = [page, ...page.frames()]
+        let clickedAdd = false
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const scopes = [parentPage, ...parentPage.frames()]
           for (const s of scopes) {
             const locators = [
-              s.getByRole('button', { name: /create damage entry|add damage entry|nova entrada|criar dano|new damage/i }),
-              s.getByRole('link', { name: /create damage entry|add damage entry|nova entrada|criar dano|new damage/i }),
-              s.getByText(/create damage entry|add damage entry|nova entrada|criar dano/i).first()
+              s.locator('button, a', { hasText: /^add damage entry$/i }),
+              s.locator('button, a', { hasText: /^create damage entry$/i }),
+              s.getByRole('button', { name: /add damage entry|create damage entry|nova entrada/i }),
+              s.getByRole('link', { name: /add damage entry|create damage entry|nova entrada/i }),
+              s.getByText(/add damage entry|create damage entry/i).first()
             ]
             for (const loc of locators) {
               try {
                 if (await loc.isVisible({ timeout: 800 }).catch(() => false)) {
                   await loc.click({ force: true })
                   clickedAdd = true
-                  log(`  ✓ Clicado em 'Create Damage Entry' (tentativa ${attempt + 1})`)
+                  log(`  ✓ Clicado em 'Add Damage Entry' (tentativa ${attempt + 1})`)
                   break
                 }
               } catch {
@@ -1236,20 +1232,36 @@ export async function runSnowDamageAutomation(
             if (clickedAdd) break
           }
           if (clickedAdd) break
-          await page.waitForTimeout(1000)
+          await parentPage.waitForTimeout(800)
         }
 
         if (!clickedAdd) {
-          // Fallback via clique direto no seletor genérico
-          await page
-            .locator('button, a', { hasText: /create damage entry|add damage entry/i })
+          await parentPage
+            .locator('button, a', { hasText: /add damage entry|create damage entry/i })
             .first()
             .click({ force: true })
             .catch(() => {})
         }
 
-        const checkFormReady = async (): Promise<boolean> => {
-          const scopes = [page, ...page.frames()]
+        let targetFormPage: Page = parentPage
+        const newPopupPage = await popupPromise
+        if (newPopupPage && !newPopupPage.isClosed()) {
+          targetFormPage = newPopupPage
+          await targetFormPage.waitForLoadState('domcontentloaded').catch(() => {})
+          await targetFormPage.bringToFront().catch(() => {})
+          log(`  ✓ Formulário aberto em nova aba (${targetFormPage.url()})`)
+        } else {
+          // Verifica se a última aba aberta é a do formulário
+          const pages = context.pages().filter((p) => !p.isClosed())
+          const lastPage = pages[pages.length - 1]
+          if (lastPage && lastPage !== parentPage) {
+            targetFormPage = lastPage
+            await targetFormPage.bringToFront().catch(() => {})
+          }
+        }
+
+        const checkFormReady = async (p: Page): Promise<boolean> => {
+          const scopes = [p, ...p.frames()]
           for (const s of scopes) {
             try {
               const hasLabel = await s.getByText(/blade serial number|sub component|failure type/i).first().isVisible({ timeout: 500 }).catch(() => false)
@@ -1260,18 +1272,17 @@ export async function runSnowDamageAutomation(
           return false
         }
 
-        let isFormReady = await checkFormReady()
+        let isFormReady = await checkFormReady(targetFormPage)
         if (!isFormReady) {
-          await page.waitForTimeout(3000)
-          isFormReady = await checkFormReady()
+          await targetFormPage.waitForTimeout(2500)
+          isFormReady = await checkFormReady(targetFormPage)
         }
 
         if (!isFormReady) {
-          log(`  ⚠ O formulário de cadastro não abriu após clicar em 'Create Damage Entry'. Recarregando página do relatório...`)
-          await page.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+          log(`  ⚠ O formulário de cadastro não abriu na aba de destino. Recarregando página do relatório...`)
+          await parentPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
           throw new Error("A tela 'Create Damage Entry' não carregou a tempo.")
         }
-
 
         // Cruza a linha atual com o mapa pré-indexado de fotos
         let localPhotos = options.localPhotosDir
@@ -1282,7 +1293,7 @@ export async function runSnowDamageAutomation(
           localPhotos = findLocalPhotosForDamage(options.localPhotosDir, row)
         }
 
-        const filler = new DamageEntryFiller(page, (m) => log(`  ${prefix} ${m}`))
+        const filler = new DamageEntryFiller(targetFormPage, (m) => log(`  ${prefix} ${m}`))
         await filler.fill(row, localPhotos, autoSubmit)
 
         processed++
@@ -1295,13 +1306,11 @@ export async function runSnowDamageAutomation(
 
         log(`✓ ${prefix} OK: ${row.bladeSerialNumber} — ${row.failureType}`)
 
-
         if (autoSubmit) {
           // Aguarda ServiceNow processar o submit nativo sem causar race condition
-          await page.waitForTimeout(2000)
+          await targetFormPage.waitForTimeout(2000)
 
-          // Verifica se a própria submissão já retornou para a página com o botão Create Damage Entry
-          const scopes = [page, ...page.frames()]
+          const scopes = [parentPage, ...parentPage.frames()]
           let canSeeCreateBtn = false
           for (const s of scopes) {
             const hasBtn = await s.getByRole('button', { name: /create damage entry|add damage entry|nova entrada/i }).isVisible({ timeout: 500 }).catch(() => false)
@@ -1312,7 +1321,7 @@ export async function runSnowDamageAutomation(
           }
 
           if (!canSeeCreateBtn) {
-            await page.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+            await parentPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
           }
         } else {
           log(`  ℹ Formulário [${i + 1}/${rows.length}] mantido aberto na tela para revisão. Avançando para a próxima linha...`)
@@ -1325,11 +1334,10 @@ export async function runSnowDamageAutomation(
       }
     }
 
-
-
     if (!autoSubmit) {
       log(`ℹ Concluído! ${processed} formulário(s) preenchido(s) com sucesso e mantido(s) aberto(s) em abas/janelas para sua revisão final.`)
     }
+
 
 
     log(`Concluído: ${processed} ok, ${failed} falha(s) de ${rows.length}.`)
