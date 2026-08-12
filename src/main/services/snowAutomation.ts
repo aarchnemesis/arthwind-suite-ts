@@ -974,6 +974,44 @@ export interface RunAutomationOptions {
   processOnlyVideos?: boolean // Se true, filtra e processa APENAS os 4 vídeos de cada pá (DF 45-50)
 }
 
+export async function auditLiveDamageEntries(page: Page, log: LogFn): Promise<Set<string>> {
+  const auditSet = new Set<string>()
+  try {
+    const scopes = [page, ...page.frames()]
+    for (const s of scopes) {
+      const rowsLocator = s.locator('tr.list_row, tr[sys_id], .list2_body tr, table.list_table tr')
+      const count = await rowsLocator.count()
+      if (count === 0) continue
+
+      for (let i = 0; i < count; i++) {
+        const text = await rowsLocator.nth(i).textContent().catch(() => '')
+        if (!text) continue
+
+        const shortSn = extractBladeSn(text).toLowerCase()
+        if (!shortSn) continue
+
+        // Extrai Seção (S1/S2) e Área (PS/SS) se presente no texto da linha da tabela
+        const secCode = /section\s*2|s2/i.test(text) ? 's2' : 's1'
+        const areaMatch = text.match(/(?:^|[\s_])(ps|ss)(?:[\s_]|$)/i)
+        const areaCode = areaMatch ? areaMatch[1].toLowerCase() : ''
+
+        // Procura números DF no texto da linha (ex: 45, 50, 53.2)
+        const dfNumbers = text.match(/\b\d{1,3}(?:\.\d+)?\b/g) || []
+        for (const dfVal of dfNumbers) {
+          auditSet.add(`${shortSn}_df${dfVal}`)
+          if (areaCode) {
+            auditSet.add(`${shortSn}_${secCode}_${areaCode}_df${dfVal}`)
+          }
+        }
+      }
+    }
+    if (auditSet.size > 0) {
+      log(`✓ Auditoria ao vivo do ServiceNow concluída: ${auditSet.size} assinatura(s) de defeito já existente(s) na tabela do relatório.`)
+    }
+  } catch {}
+  return auditSet
+}
+
 export async function checkRowExistsInLiveTable(page: Page, row: DamageReportRow): Promise<boolean> {
   try {
     const scopes = [page, ...page.frames()]
@@ -1009,6 +1047,7 @@ export async function checkRowExistsInLiveTable(page: Page, row: DamageReportRow
   } catch {}
   return false
 }
+
 
 function getSubmittedStorePath(): string {
   const appData = process.env.APPDATA || path.join(os.homedir(), '.config')
@@ -1117,6 +1156,20 @@ export async function runSnowDamageAutomation(
 
     log(`${rows.length} linha(s) a processar (Modo: ${autoSubmit ? 'Submissão Automática' : 'Conferência Manual'}).`)
 
+    // Abre a página principal para realizar a auditoria prévia ao vivo dos defeitos já cadastrados no ServiceNow
+    let auditContext: BrowserContext
+    try {
+      auditContext = await getContext(options.headless ?? false)
+    } catch {
+      await closeServiceNowSession()
+      auditContext = await getContext(options.headless ?? false)
+    }
+    const auditPage = auditContext.pages().find((p) => !p.isClosed()) || (await auditContext.newPage())
+    if (!auditPage.url().includes(incidentUrl.split('?')[0])) {
+      await auditPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+    }
+    await auditLiveDamageEntries(auditPage, log)
+
     let processed = 0
     let failed = 0
     const errors: string[] = []
@@ -1152,11 +1205,10 @@ export async function runSnowDamageAutomation(
         // Checagem ao vivo na tabela Damage Report Entries do ServiceNow
         const existsInSnow = await checkRowExistsInLiveTable(page, row)
         if (existsInSnow) {
-          log(`  ℹ [SNOW Live Check] Entrada para ${row.bladeSerialNumber} (${row.subComponent} DF ${row.dfDistanceStart}-${row.dfDistanceEnd}) já existe na tabela do ServiceNow. Pulando...`)
-          markRowSubmitted(buildRowKey(incidentUrl, row))
+          log(`  ℹ [SNOW Live Audit] Entrada para ${row.bladeSerialNumber} (${row.subComponent} DF ${row.dfDistanceStart}-${row.dfDistanceEnd}) já cadastrada na tabela do ServiceNow. Pulando...`)
+          if (autoSubmit) markRowSubmitted(buildRowKey(incidentUrl, row))
           continue
         }
-
 
         // Busca o botão "Create Damage Entry" na página principal ou em iFrames com até 10 tentativas
         let clickedAdd = false
@@ -1197,7 +1249,13 @@ export async function runSnowDamageAutomation(
         }
 
         const activeScope = page.frames().find((f) => f.name() === 'gsft_main' || f.url().includes('.do')) || page
-        await activeScope.getByLabel('Blade serial number', { exact: false }).first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {})
+        const isFormReady = await activeScope.getByLabel('Blade serial number', { exact: false }).first().isVisible({ timeout: 8000 }).catch(() => false)
+
+        if (!isFormReady) {
+          log(`  ⚠ O formulário de cadastro não abriu após clicar em 'Create Damage Entry'. Recarregando página do relatório...`)
+          await page.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+          throw new Error("A tela 'Create Damage Entry' não carregou a tempo.")
+        }
 
         // Cruza a linha atual com o mapa pré-indexado de fotos
         let localPhotos = options.localPhotosDir
@@ -1208,15 +1266,19 @@ export async function runSnowDamageAutomation(
           localPhotos = findLocalPhotosForDamage(options.localPhotosDir, row)
         }
 
-
         const filler = new DamageEntryFiller(page, (m) => log(`  ${prefix} ${m}`))
         await filler.fill(row, localPhotos, autoSubmit)
 
         processed++
-        const rowKey = buildRowKey(incidentUrl, row)
-        markRowSubmitted(rowKey)
+
+        // Salva na memória local APENAS se a submissão automática estiver ativa e com sucesso
+        if (autoSubmit) {
+          const rowKey = buildRowKey(incidentUrl, row)
+          markRowSubmitted(rowKey)
+        }
 
         log(`✓ ${prefix} OK: ${row.bladeSerialNumber} — ${row.failureType}`)
+
 
         if (autoSubmit) {
           // Aguarda ServiceNow processar o submit nativo sem causar race condition
