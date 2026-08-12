@@ -261,36 +261,40 @@ class DamageEntryFiller {
       if (tempPaths.length > 0) {
         const scope = this.getScope()
 
-        // 1. Clica no botão "Add attachments" (📎) no ServiceNow para ativar o input
-        const attachmentBtn = scope
-          .locator('.attachment-button, [title*="attachment"]')
-          .or(scope.getByText(/add attachments/i))
-          .or(scope.locator('a, button', { hasText: /attachment/i }))
-          .first()
+        for (let i = 0; i < tempPaths.length; i++) {
+          const filePath = tempPaths[i]
+          const fileName = path.basename(filePath)
 
-        let setViaChooser = false
-        if (await attachmentBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
-          // Intercepta o evento 'filechooser' nativo do Chromium para impedir a abertura da janela do Windows Explorer
-          const fileChooserPromise = this.page.waitForEvent('filechooser', { timeout: 3000 }).catch(() => null)
-          await attachmentBtn.click({ force: true }).catch(() => {})
-          const fileChooser = await fileChooserPromise
+          // 1. Clica no botão "Add attachments" (📎) para cada foto individualmente
+          const attachmentBtn = scope
+            .locator('.attachment-button, [title*="attachment"]')
+            .or(scope.getByText(/add attachments/i))
+            .or(scope.locator('a, button', { hasText: /attachment/i }))
+            .first()
 
-          if (fileChooser) {
-            await fileChooser.setFiles(tempPaths)
-            setViaChooser = true
-            this.log(`  ✓ ${tempPaths.length} foto(s) anexadas via filechooser interceptado (sem janela do Explorer)!`)
+          let setViaChooser = false
+          if (await attachmentBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
+            const fileChooserPromise = this.page.waitForEvent('filechooser', { timeout: 3000 }).catch(() => null)
+            await attachmentBtn.click({ force: true }).catch(() => {})
+            const fileChooser = await fileChooserPromise
+
+            if (fileChooser) {
+              await fileChooser.setFiles([filePath])
+              setViaChooser = true
+              this.log(`  ✓ Foto ${i + 1}/${tempPaths.length} (${fileName}) anexada via filechooser!`)
+            }
           }
+
+          if (!setViaChooser) {
+            const fileInput = scope.locator('input[type="file"]').last().or(scope.locator('input[type="file"]').first())
+            await fileInput.evaluate((el: HTMLInputElement) => el.setAttribute('multiple', 'multiple')).catch(() => {})
+            await fileInput.setInputFiles([filePath])
+            this.log(`  ✓ Foto ${i + 1}/${tempPaths.length} (${fileName}) anexada via input DOM!`)
+          }
+
+          // Aguarda o encerramento do upload do ServiceNow para a foto atual
+          await this.page.waitForTimeout(1500)
         }
-
-        if (!setViaChooser) {
-          // Fallback de injeção direta no input[type="file"]
-          const fileInput = scope.locator('input[type="file"]').last().or(scope.locator('input[type="file"]').first())
-          await fileInput.setInputFiles(tempPaths)
-          this.log(`  ✓ ${tempPaths.length} foto(s) anexadas via input direto no DOM!`)
-        }
-
-        await this.page.waitForTimeout(1200)
-
       }
     } catch (err: any) {
       this.log(`  ⚠ Erro no upload de fotos: ${err.message || err}`)
