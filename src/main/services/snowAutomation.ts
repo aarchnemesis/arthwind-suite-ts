@@ -807,16 +807,23 @@ export async function runSnowDamageAutomation(
     log(`${rows.length} linha(s) a processar (Modo: ${autoSubmit ? 'Submissão Automática' : 'Conferência Manual'}).`)
 
     const context = await getContext(options.headless ?? false)
-    const page = context.pages().find((p) => !p.isClosed()) || (await context.newPage())
-
     let processed = 0
     let failed = 0
     const errors: string[] = []
 
     for (let i = 0; i < rows.length; i++) {
+
       const row = rows[i]
       const prefix = `[${i + 1}/${rows.length}]`
       try {
+        let page: Page
+        if (i === 0) {
+          page = context.pages().find((p) => !p.isClosed()) || (await context.newPage())
+        } else {
+          page = await context.newPage()
+        }
+
+        await page.bringToFront().catch(() => {})
         if (!page.url().startsWith(incidentUrl)) {
           await page.goto(incidentUrl, { waitUntil: 'domcontentloaded' })
         }
@@ -863,9 +870,10 @@ export async function runSnowDamageAutomation(
         processed++
         log(`✓ ${prefix} OK: ${row.bladeSerialNumber} — ${row.failureType}`)
 
-        if (!autoSubmit) {
-          log(`ℹ Modo conferência manual ativo: o formulário foi preenchido com sucesso e mantido aberto no navegador para sua revisão.`)
-          break
+        if (autoSubmit) {
+          await page.close().catch(() => {})
+        } else {
+          log(`  ℹ Formulário [${i + 1}/${rows.length}] mantido aberto na tela para revisão. Avançando para a próxima linha...`)
         }
       } catch (err: any) {
         failed++
@@ -874,6 +882,11 @@ export async function runSnowDamageAutomation(
         log(msg)
       }
     }
+
+    if (!autoSubmit) {
+      log(`ℹ Concluído! ${processed} formulário(s) preenchido(s) com sucesso e mantido(s) aberto(s) em abas/janelas para sua revisão final.`)
+    }
+
 
     log(`Concluído: ${processed} ok, ${failed} falha(s) de ${rows.length}.`)
     return { success: true, processed, failed, errors }
