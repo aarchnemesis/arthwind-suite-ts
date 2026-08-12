@@ -979,7 +979,26 @@ export async function auditLiveDamageEntries(page: Page, log: LogFn): Promise<Se
   const auditSet = new Set<string>()
   try {
     await page.waitForLoadState('domcontentloaded').catch(() => {})
-    await page.waitForTimeout(1500)
+
+    // Aguarda ativamente o widget Angular da tabela de defeitos carregar na página
+    for (let wait = 0; wait < 12; wait++) {
+      const scopes = [page, ...page.frames()]
+      let foundRows = 0
+      for (const s of scopes) {
+        const c = await s
+          .locator(
+            'table tbody tr, tr[ng-repeat], tr.ng-scope, tr.list_row, tr[sys_id], .list2_body tr, table.list_table tr, div.list-group-item, div.table-responsive tr'
+          )
+          .count()
+          .catch(() => 0)
+        if (c > 0) {
+          foundRows = c
+          break
+        }
+      }
+      if (foundRows > 0) break
+      await page.waitForTimeout(500)
+    }
 
     const scopes = [page, ...page.frames()]
     for (const s of scopes) {
@@ -1029,35 +1048,58 @@ export async function checkRowExistsInLiveTable(page: Page, row: DamageReportRow
     const shortSn = extractBladeSn(row.bladeSerialNumber)
 
     for (const s of scopes) {
-      const rowsLocator = s.locator('tr.list_row, tr[sys_id], .list2_body tr, table.list_table tr')
-      const count = await rowsLocator.count()
-      if (count === 0) continue
+      const rowsLocator = s.locator(
+        'table tbody tr, tr[ng-repeat], tr.ng-scope, tr.list_row, tr[sys_id], .list2_body tr, table.list_table tr, div.list-group-item, div.table-responsive tr'
+      )
+      const count = await rowsLocator.count().catch(() => 0)
 
-      for (let i = 0; i < count; i++) {
-        const text = await rowsLocator.nth(i).textContent().catch(() => '')
-        if (!text) continue
+      if (count > 0) {
+        for (let i = 0; i < count; i++) {
+          const text = await rowsLocator.nth(i).textContent().catch(() => '')
+          if (!text) continue
 
-        const hasSn = !shortSn || text.includes(shortSn)
-        const hasSubComp = text.includes(row.subComponent) || (row.subComponent.includes('Shell') && text.includes('Shell'))
+          const hasSn = !shortSn || text.includes(shortSn)
+          const hasSubComp = text.includes(row.subComponent) || (row.subComponent.includes('Shell') && text.includes('Shell'))
 
-        let hasMatch = false
-        if (row.dfDistanceStart === 45 && row.dfDistanceEnd === 50) {
-          const hasSec = text.includes(row.bladeSection) || (row.bladeSection === 'Section 1' && text.includes('Section 1'))
-          const hasArea = text.includes(row.bladeArea)
-          hasMatch = hasSn && hasSubComp && (text.includes('45') || text.includes('50')) && hasSec && hasArea
-        } else {
-          const hasDf = text.includes(String(row.dfDistanceStart))
-          hasMatch = hasSn && hasSubComp && hasDf
+          let hasMatch = false
+          if (row.dfDistanceStart === 45 && row.dfDistanceEnd === 50) {
+            const hasSec = text.includes(row.bladeSection) || (row.bladeSection === 'Section 1' && text.includes('Section 1'))
+            const hasArea = text.includes(row.bladeArea)
+            hasMatch = hasSn && hasSubComp && (text.includes('45') || text.includes('50')) && hasSec && hasArea
+          } else {
+            const hasDf = text.includes(String(row.dfDistanceStart))
+            hasMatch = hasSn && hasSubComp && hasDf
+          }
+
+          if (hasMatch) {
+            return true
+          }
         }
+      }
 
-        if (hasMatch) {
-          return true
+      // Fallback: varredura no texto completo do body caso a tabela use uma estrutura customizada
+      const bodyText = await s.locator('body').textContent().catch(() => '')
+      if (bodyText) {
+        const hasSn = !shortSn || bodyText.includes(shortSn)
+        const hasSubComp = bodyText.includes(row.subComponent)
+        if (row.dfDistanceStart === 45 && row.dfDistanceEnd === 50) {
+          const hasSec = bodyText.includes(row.bladeSection)
+          const hasArea = bodyText.includes(row.bladeArea)
+          if (hasSn && hasSubComp && (bodyText.includes('DF 45') || bodyText.includes('45-50')) && hasSec && hasArea) {
+            return true
+          }
+        } else {
+          const dfStr = `DF ${row.dfDistanceStart}`
+          if (hasSn && hasSubComp && (bodyText.includes(dfStr) || bodyText.includes(String(row.dfDistanceStart)))) {
+            return true
+          }
         }
       }
     }
   } catch {}
   return false
 }
+
 
 
 function getSubmittedStorePath(): string {
