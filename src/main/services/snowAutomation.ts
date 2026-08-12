@@ -455,6 +455,19 @@ class DamageEntryFiller {
     await this.selectFromComboBox('Inside/Outside', data.insideOutside, 800)
     await this.selectFromComboBox('Blade section', data.bladeSection, 800)
     await this.selectFromComboBox('Blade sub-section', data.bladeSubSection, 800)
+
+    // Se o campo "Blade shear web" estiver visível (ex.: quando Blade sub-section é Shear Web)
+    const scope = this.getScope()
+    const isShearWebVisible =
+      (await scope.getByLabel('Blade shear web', { exact: false }).first().isVisible({ timeout: 1200 }).catch(() => false)) ||
+      (await scope.locator('div.form-group, .select2-container', { hasText: /blade shear web/i }).first().isVisible({ timeout: 1200 }).catch(() => false))
+
+    if (isShearWebVisible) {
+      this.log(`    Campo 'Blade shear web' detectado visível.`)
+      const shearWebValue = data.bladeArea && /shear\s*web/i.test(data.bladeArea) ? data.bladeArea : 'Shear Web 1'
+      await this.selectFromComboBox('Blade shear web', shearWebValue, 800)
+    }
+
     await this.selectFromComboBox('Blade area', data.bladeArea, 800)
 
     await this.fillText('Size (mm)', data.sizeMm)
@@ -538,10 +551,19 @@ async function readDamageRows(excelPath: string): Promise<DamageReportRow[]> {
           .filter(Boolean)
       : []
 
+    const subComponent = String(row.getCell(2).value ?? '').trim()
+    let failureType = String(row.getCell(3).value ?? '').trim()
+
+    // Regra de negócio do cliente: "Air inclusion" com sub-componente "Web Laminate" não existe no SNOW.
+    // Nesses casos, altera para "Type of failure is missing"
+    if (/web\s*laminate/i.test(subComponent) && /air\s*inclusion|bubbles/i.test(failureType)) {
+      failureType = 'Type of failure is missing'
+    }
+
     rows.push({
       bladeSerialNumber: bladeSerial,
-      subComponent: String(row.getCell(2).value ?? '').trim(),
-      failureType: String(row.getCell(3).value ?? '').trim(),
+      subComponent,
+      failureType,
       damageDescription: String(row.getCell(4).value ?? '').trim(),
       dfDistanceStart: Number(row.getCell(5).value ?? 0),
       dfDistanceEnd: Number(row.getCell(6).value ?? 0),
@@ -558,6 +580,7 @@ async function readDamageRows(excelPath: string): Promise<DamageReportRow[]> {
   }
   return rows
 }
+
 
 /** Extrai o S/N de 4 dígitos exatos do serial completo (ex.: "A1 811 0413 0115" -> "0413" ou "B0413_S2..." -> "0413") */
 export function extractBladeSn(bladeSerial: string): string {

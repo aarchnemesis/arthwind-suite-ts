@@ -64,10 +64,19 @@ export class SnowMappings {
     'Others':                              'Type of Failure is Missing',
   }
 
-  static getFailure(original: string): string {
+  static getFailure(original: string, subComponent?: string): string {
     const key = (original || '').trim()
+    const sub = (subComponent || '').trim()
+
+    // Regra de negócio do cliente: "Air inclusion" com sub-componente "Web Laminate" não existe no SNOW.
+    // Nesses casos, altera para "Type of Failure is Missing".
+    if (/web\s*laminate/i.test(sub) && (/bubbles/i.test(key) || /air\s*inclusion/i.test(key))) {
+      return 'Type of Failure is Missing'
+    }
+
     return this.FAILURE_TYPES[key] ?? 'Type of Failure is Missing'
   }
+
 
   static getDamageDescription(bladeSn: string | number, originalFailure: string): string {
     const rawSn = String(bladeSn || '').replace(/^B/i, '').replace(/^0+/, '')
@@ -778,7 +787,8 @@ export async function processSnowExcel(
     const dfStart = round1(toFloat(dfStartRaw) ?? 0)
     const sizeMm  = toFloat(sizeMmRaw) ?? 0
 
-    const failureType   = SnowMappings.getFailure(origFail)
+    const subComponent  = SnowMappings.getSubComponent(component) // Dynamic component mapping!
+    const failureType   = SnowMappings.getFailure(origFail, subComponent)
     const damageDesc    = SnowMappings.getDamageDescription(bladeSn, origFail)
     const dfEnd         = SnowMappings.getDfEnd(dfStart, sizeMm)
     const profileDepth  = SnowMappings.getProfileFromCoordinates(
@@ -787,7 +797,7 @@ export async function processSnowExcel(
     const bladeSection  = SnowMappings.getBladeSection(section)
     const bladeSubsec   = SnowMappings.getBladeSubsection(component)
     const bladeArea     = SnowMappings.getBladeArea(component, side)
-    const subComponent  = SnowMappings.getSubComponent(component) // Dynamic component mapping!
+
 
     const bladeInfo = getBladeInfo(bladeSn)
     const fullBladeSerial = bladeInfo.serial || String(bladeSn)
