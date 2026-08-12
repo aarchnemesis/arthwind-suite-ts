@@ -289,8 +289,9 @@ export default function SnowAutomationModule({ D }) {
                           disabled={running}
                         />
                         <span style={{ fontWeight: 600, color: D.textPrimary, fontSize: '11px' }}>
-                          Pá {b.shortSn}
+                          Pá S/N {b.shortSn}
                         </span>
+
                       </div>
                       <span style={{ color: D.textMuted, fontSize: '10px' }}>
                         {b.count} dano(s) (L{b.startRow}-{b.endRow})

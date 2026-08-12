@@ -361,6 +361,32 @@ async function readDamageRows(excelPath: string): Promise<DamageReportRow[]> {
   return rows
 }
 
+/** Extrai o S/N de 4 dígitos exatos do serial completo (ex.: "A1 811 0410 0115" -> "0410") */
+export function extractBladeSn(bladeSerial: string): string {
+  if (!bladeSerial) return ''
+  const trimmed = bladeSerial.trim()
+
+  // Estrutura padrão: "A1 811 0410 0115" -> tokens[2] é o "0410" (S/N da Pá)
+  const tokens = trimmed.split(/[\s\-_]+/)
+  if (tokens.length >= 4 && /^\d{4}$/.test(tokens[2])) {
+    return tokens[2]
+  }
+
+  // Captura o grupo de 4 dígitos que vem imediatamente antes do SET (último grupo de 4 dígitos)
+  const match = trimmed.match(/\b(\d{4})\s+\d{4}\b/)
+  if (match) {
+    return match[1]
+  }
+
+  // Fallback
+  const match4 = trimmed.match(/\b\d{4}\b/)
+  if (match4) {
+    return match4[0]
+  }
+
+  return trimmed
+}
+
 // ─── Leitura e Inspeção de Pás da Planilha ─────────────────────────────────
 
 export interface BladeSummary {
@@ -385,9 +411,8 @@ export async function getSpreadsheetBlades(
       const bladeSerial = String(row.getCell(1).value ?? '').trim()
       if (!bladeSerial || bladeSerial.toLowerCase() === 'blank image') continue
 
-      // Extrai SN curto (ex.: "A1 811 0410 0115" -> "410")
-      const snMatch = bladeSerial.match(/\b\d{3,4}\b/)
-      const shortSn = snMatch ? snMatch[0] : bladeSerial
+      // Extrai S/N de 4 dígitos exatos (ex.: "A1 811 0410 0115" -> "0410")
+      const shortSn = extractBladeSn(bladeSerial)
 
       if (!map.has(bladeSerial)) {
         map.set(bladeSerial, {
@@ -415,9 +440,8 @@ export async function getSpreadsheetBlades(
 function findLocalPhotosForDamage(localPhotosDir: string, data: DamageReportRow): string[] {
   if (!localPhotosDir || !fs.existsSync(localPhotosDir)) return []
 
-  // SN da pá (ex: "A1 811 0410 0115" -> "410")
-  const snMatch = data.bladeSerialNumber.match(/\b\d{3,4}\b/)
-  const shortSn = snMatch ? snMatch[0] : ''
+  // S/N de 4 dígitos exatos (ex: "A1 811 0410 0115" -> "0410")
+  const shortSn = extractBladeSn(data.bladeSerialNumber)
 
   // Padrão do DF (ex: "DF59-59.1" ou "DF59-59")
   const dfPattern = `DF${data.dfDistanceStart}-${data.dfDistanceEnd}`
@@ -436,7 +460,7 @@ function findLocalPhotosForDamage(localPhotosDir: string, data: DamageReportRow)
           if (
             (lower.includes('pic1') || lower.includes('pic2')) &&
             (lower.includes(dfPattern.toLowerCase()) || lower.includes(`df${data.dfDistanceStart}`)) &&
-            (!shortSn || lower.includes(shortSn))
+            (!shortSn || lower.includes(shortSn.toLowerCase()))
           ) {
             matches.push(full)
           }
@@ -444,6 +468,7 @@ function findLocalPhotosForDamage(localPhotosDir: string, data: DamageReportRow)
       }
     } catch {}
   }
+
 
   scan(localPhotosDir)
 
