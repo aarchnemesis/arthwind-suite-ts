@@ -252,79 +252,114 @@ class DamageEntryFiller {
     }
   }
 
-  private async addOptionalFields(optionText: string = 'SN_241'): Promise<void> {
+  private async addOptionalFields(optionSearchText: string = '241'): Promise<void> {
     const scope = this.getScope()
-    this.log(`    Preenchendo Optional fields: "${optionText}"`)
+    this.log(`    Configurando Optional Fields ("${optionSearchText}")...`)
 
     try {
-      // 1. Tenta localizar a caixa de combobox / dropdown de Optional fields ou Options
-      const optionsFieldCandidates = [
-        scope.locator('.select2-container').filter({ has: scope.getByText(/optional fields|options/i) }).locator('.select2-choice').first(),
-        scope.locator('div.form-group, .sc-form-field', { hasText: /optional fields|options/i }).locator('.select2-choice, .select2-container').first(),
-        scope.getByRole('combobox', { name: /optional fields|options/i }).first(),
-        scope.getByLabel(/optional fields|options/i, { exact: false }).first()
-      ]
+      // 1. Marca o checkbox "Set Optional Fields" se não estiver marcado
+      const setOptionalCheckbox = scope
+        .locator('label', { hasText: /set optional fields/i })
+        .locator('input[type="checkbox"]')
+        .or(scope.getByLabel(/set optional fields/i))
+        .first()
 
-      let opened = false
-      for (const candidate of optionsFieldCandidates) {
-        try {
-          if (await candidate.isVisible({ timeout: 1200 }).catch(() => false)) {
-            await candidate.click({ force: true })
-            opened = true
-            break
-          }
-        } catch {
-          /* tenta próximo */
+      if (await setOptionalCheckbox.isVisible({ timeout: 2000 }).catch(() => false)) {
+        const isChecked = await setOptionalCheckbox.isChecked().catch(() => false)
+        if (!isChecked) {
+          await setOptionalCheckbox.check({ force: true }).catch(async () => {
+            await setOptionalCheckbox.click({ force: true })
+          })
+          this.log(`    ✓ Checkbox 'Set Optional Fields' marcado.`)
+          await this.page.waitForTimeout(400)
+        }
+      } else {
+        await scope.getByText(/set optional fields/i).first().click({ force: true }).catch(() => {})
+        await this.page.waitForTimeout(400)
+      }
+
+      // Se a opção SN_241 já está presente na tabela Optional Fields, não adiciona de novo
+      const alreadyAdded = await scope.getByText(/SN_241|NR81\.5/i).first().isVisible({ timeout: 1000 }).catch(() => false)
+      if (alreadyAdded) {
+        this.log(`    ✓ Opção SN_241 já está presente em Optional Fields.`)
+        return
+      }
+
+      // 2. Clicar no botão "Add" da seção Optional Fields para abrir a modal "Add Row"
+      const addTableBtn = scope
+        .locator('div, section, fieldset', { hasText: /optional fields/i })
+        .getByRole('button', { name: /^add$/i })
+        .or(scope.getByRole('button', { name: /^add$/i }).first())
+
+      await addTableBtn.click({ force: true })
+      this.log(`    ✓ Clicado no botão Add para abrir a modal 'Add Row'`)
+      await this.page.waitForTimeout(600)
+
+      // 3. Modal "Add Row"
+      const modal = scope.locator('.modal-dialog, .modal-content, [role="dialog"]').first()
+      await modal.waitFor({ state: 'visible', timeout: 5000 })
+
+      // Preenche o campo "Option" no modal (Select2)
+      const optionField = modal
+        .locator('.select2-choice')
+        .or(modal.getByRole('combobox', { name: /option/i }))
+        .or(modal.getByLabel(/option/i, { exact: false }))
+        .first()
+
+      await optionField.click({ force: true })
+      await this.page.waitForTimeout(300)
+
+      // Digita "241" na caixa de busca do Select2
+      const searchBox = scope
+        .locator('.select2-input, input.select2-search, input[role="combobox"]')
+        .last()
+        .or(scope.getByRole('textbox').last())
+
+      if (await searchBox.isVisible({ timeout: 1500 }).catch(() => false)) {
+        await searchBox.fill(optionSearchText)
+        await this.page.waitForTimeout(400)
+      }
+
+      // Clicar na opção "SN_241 - Inspection of NR81.5 Blades in Service"
+      const optionItem = scope
+        .locator('.select2-result-label', { hasText: /241|SN_241/i })
+        .or(scope.getByRole('option', { name: /241|SN_241/i }))
+        .or(scope.getByText(/SN_241/i))
+        .first()
+
+      await optionItem.click({ force: true })
+      await this.page.waitForTimeout(300)
+
+      // Marca o checkbox "True / False" se disponível
+      const trueFalseCheckbox = modal
+        .getByLabel(/true\s*\/\s*false/i)
+        .or(modal.locator('label', { hasText: /true\s*\/\s*false/i }).locator('input[type="checkbox"]'))
+        .first()
+
+      if (await trueFalseCheckbox.isVisible({ timeout: 1000 }).catch(() => false)) {
+        const isTrueChecked = await trueFalseCheckbox.isChecked().catch(() => false)
+        if (!isTrueChecked) {
+          await trueFalseCheckbox.check({ force: true }).catch(async () => {
+            await trueFalseCheckbox.click({ force: true })
+          })
         }
       }
 
-      if (opened) {
-        await this.page.waitForTimeout(300)
+      // 4. Clicar no botão "Add" DENTRO da modal para salvar a linha
+      const modalAddBtn = modal
+        .getByRole('button', { name: /^add$/i })
+        .or(modal.locator('button.btn-primary', { hasText: /^add$/i }))
+        .first()
 
-        const searchBox = scope
-          .locator('.select2-input, input.select2-search, input[role="combobox"]')
-          .last()
-          .or(scope.getByRole('textbox').last())
+      await modalAddBtn.click({ force: true })
+      this.log(`    ✓ Opção SN_241 adicionada com sucesso na modal!`)
+      await this.page.waitForTimeout(600)
 
-        if (await searchBox.isVisible({ timeout: 1500 }).catch(() => false)) {
-          await searchBox.fill(optionText)
-          await this.page.waitForTimeout(300)
-        }
-
-        const optionLocator = scope
-          .locator('.select2-result-label', { hasText: optionText }).first()
-          .or(scope.locator('li.select2-result', { hasText: optionText }).first())
-          .or(scope.getByRole('option', { name: optionText }).first())
-          .or(scope.getByText(optionText, { exact: false }).first())
-
-        await optionLocator.click({ force: true }).catch(() => {})
-        await this.page.waitForTimeout(300)
-      }
-
-      // 2. Clicar no botão "Add"
-      const addBtnCandidates = [
-        scope.getByRole('button', { name: /^add$/i }),
-        scope.getByRole('button', { name: /adicionar/i }),
-        scope.locator('button, a.btn', { hasText: /^add$/i }),
-        scope.locator('button, a.btn', { hasText: /add/i })
-      ]
-
-      for (const addBtn of addBtnCandidates) {
-        try {
-          if (await addBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
-            await addBtn.click({ force: true })
-            this.log(`    ✓ Clicado no botão Add em Optional fields ("${optionText}")`)
-            await this.page.waitForTimeout(500)
-            break
-          }
-        } catch {
-          /* tenta próximo */
-        }
-      }
     } catch (err: any) {
-      this.log(`    ⚠ Optional fields (${optionText}): ${err.message || err}`)
+      this.log(`    ⚠ Erro ao configurar Optional Fields: ${err.message || err}`)
     }
   }
+
 
   async fill(data: DamageReportRow, localPhotosDir?: string, autoSubmit: boolean = false): Promise<void> {
     this.log(
