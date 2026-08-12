@@ -1203,64 +1203,85 @@ export async function runSnowDamageAutomation(
           continue
         }
 
-        // Registra a contagem de páginas abertas antes de clicar no botão
-        const initialPages = context.pages().filter((p) => !p.isClosed())
-        const initialCount = initialPages.length
+        // Abre o formulário obtendo o link do Add Damage Entry ou criando uma nova aba dedicada via context.newPage()
+        let targetFormPage: Page | null = null
 
-        // Clica no botão "Add Damage Entry" na página principal
-        let clickedAdd = false
-        for (let attempt = 0; attempt < 5; attempt++) {
-          const scopes = [parentPage, ...parentPage.frames()]
-          for (const s of scopes) {
-            const locators = [
-              s.locator('button, a', { hasText: /^add damage entry$/i }),
-              s.locator('button, a', { hasText: /^create damage entry$/i }),
-              s.getByRole('button', { name: /add damage entry|create damage entry|nova entrada/i }),
-              s.getByRole('link', { name: /add damage entry|create damage entry|nova entrada/i }),
-              s.getByText(/add damage entry|create damage entry/i).first()
-            ]
-            for (const loc of locators) {
-              try {
-                if (await loc.isVisible({ timeout: 800 }).catch(() => false)) {
-                  await loc.click({ force: true })
-                  clickedAdd = true
-                  log(`  ✓ Clicado em 'Add Damage Entry' (tentativa ${attempt + 1})`)
+        // 1. Tenta extrair o href do botão Add Damage Entry na página principal
+        let formHref: string | null = null
+        const scopes = [parentPage, ...parentPage.frames()]
+        for (const s of scopes) {
+          const btnLocators = [
+            s.locator('a, button', { hasText: /^add damage entry$/i }),
+            s.locator('a, button', { hasText: /^create damage entry$/i }),
+            s.getByRole('link', { name: /add damage entry|create damage entry/i }),
+            s.getByRole('button', { name: /add damage entry|create damage entry/i }),
+            s.locator('a, button', { hasText: /damage entry/i })
+          ]
+          for (const loc of btnLocators) {
+            try {
+              if (await loc.isVisible({ timeout: 800 }).catch(() => false)) {
+                const h = await loc.getAttribute('href').catch(() => null)
+                if (h) {
+                  formHref = h
                   break
                 }
-              } catch {
-                /* tenta próximo */
               }
+            } catch {}
+          }
+          if (formHref) break
+        }
+
+        if (formHref) {
+          const origin = new URL(parentPage.url()).origin
+          const fullFormUrl = formHref.startsWith('http') ? formHref : `${origin}${formHref.startsWith('/') ? '' : '/'}${formHref}`
+          targetFormPage = await context.newPage()
+          await targetFormPage.goto(fullFormUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+          await targetFormPage.bringToFront().catch(() => {})
+          log(`  ✓ Aberta nova aba limpa para a linha ${prefix}`)
+        } else {
+          // Fallback: clica no botão interceptando popup
+          const initialCount = context.pages().filter((p) => !p.isClosed()).length
+          const popupPromise = context.waitForEvent('page', { timeout: 4000 }).catch(() => null)
+
+          let clickedAdd = false
+          for (let attempt = 0; attempt < 5; attempt++) {
+            for (const s of scopes) {
+              const locators = [
+                s.locator('button, a', { hasText: /^add damage entry$/i }),
+                s.locator('button, a', { hasText: /^create damage entry$/i }),
+                s.getByRole('button', { name: /add damage entry|create damage entry|nova entrada/i }),
+                s.getByRole('link', { name: /add damage entry|create damage entry|nova entrada/i }),
+                s.getByText(/add damage entry|create damage entry/i).first()
+              ]
+              for (const loc of locators) {
+                try {
+                  if (await loc.isVisible({ timeout: 800 }).catch(() => false)) {
+                    await loc.click({ force: true })
+                    clickedAdd = true
+                    break
+                  }
+                } catch {}
+              }
+              if (clickedAdd) break
             }
             if (clickedAdd) break
+            await parentPage.waitForTimeout(800)
           }
-          if (clickedAdd) break
-          await parentPage.waitForTimeout(800)
-        }
 
-        if (!clickedAdd) {
-          await parentPage
-            .locator('button, a', { hasText: /add damage entry|create damage entry/i })
-            .first()
-            .click({ force: true })
-            .catch(() => {})
-        }
-
-        // Aguarda a criação de uma NOVA aba especificamente para esta linha
-        let targetFormPage: Page = parentPage
-        for (let waitCount = 0; waitCount < 20; waitCount++) {
-          const currentPages = context.pages().filter((p) => !p.isClosed())
-          if (currentPages.length > initialCount) {
-            targetFormPage = currentPages[currentPages.length - 1]
-            break
+          const newPopupPage = await popupPromise
+          if (newPopupPage && !newPopupPage.isClosed()) {
+            targetFormPage = newPopupPage
+          } else {
+            const currentPages = context.pages().filter((p) => !p.isClosed())
+            if (currentPages.length > initialCount) {
+              targetFormPage = currentPages[currentPages.length - 1]
+            } else {
+              targetFormPage = parentPage
+            }
           }
-          await parentPage.waitForTimeout(300)
-        }
-
-        if (targetFormPage !== parentPage) {
-          await targetFormPage.waitForLoadState('domcontentloaded').catch(() => {})
           await targetFormPage.bringToFront().catch(() => {})
-          log(`  ✓ Nova aba de formulário ativada (${targetFormPage.url()})`)
         }
+
 
 
         const checkFormReady = async (p: Page): Promise<boolean> => {
