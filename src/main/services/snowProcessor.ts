@@ -754,6 +754,9 @@ export async function processSnowExcel(
   const photoDownloadQueue: DownloadParams[] = []
   const nameCounts = new Map<string, number>()
 
+  // Unique blades set for Video rows generation
+  const uniqueBladesMap = new Map<string, { fullBladeSerial: string; shortSn: string; setNumber: string }>()
+
   for (let rowNum = 2; rowNum <= inWs.rowCount; rowNum++) {
     const row = inWs.getRow(rowNum)
 
@@ -798,9 +801,18 @@ export async function processSnowExcel(
     const bladeSubsec   = SnowMappings.getBladeSubsection(component)
     const bladeArea     = SnowMappings.getBladeArea(component, side)
 
-
     const bladeInfo = getBladeInfo(bladeSn)
     const fullBladeSerial = bladeInfo.serial || String(bladeSn)
+    const paddedBladeSn = String(bladeSn).replace(/^B/i, '').padStart(4, '0')
+    const setNumberStr = bladeInfo.setNumber ? String(bladeInfo.setNumber).padStart(2, '0') : '00'
+
+    if (!uniqueBladesMap.has(paddedBladeSn)) {
+      uniqueBladesMap.set(paddedBladeSn, {
+        fullBladeSerial,
+        shortSn: paddedBladeSn,
+        setNumber: setNumberStr
+      })
+    }
 
     const dfStartStr = dfStart.toFixed(1)
     const dfEndStr   = dfEnd.toFixed(1)
@@ -826,7 +838,6 @@ export async function processSnowExcel(
       poi ?? null,               // P — POI
     ])
 
-
     // Apply soft red highlight if it's Delamination >= 45m
     if (SnowMappings.shouldHighlight(failureType, dfStart)) {
       newRow.eachCell((cell) => {
@@ -843,7 +854,6 @@ export async function processSnowExcel(
     // Enqueue photo download parameters with unique sequential pic names
     if (photoLink) {
       const areaCode = SnowMappings.areaToFileCode(bladeArea)
-      const paddedBladeSn = String(bladeSn).replace(/^B/i, '').padStart(4, '0')
       const bladeCode = `B${paddedBladeSn}`
 
       let secCode = 'S1'
@@ -867,6 +877,7 @@ export async function processSnowExcel(
       const pic1Name = `${baseName}_pic${pic1Index}.jpeg`
       const pic2Name = `${baseName}_pic${pic2Index}.jpeg`
 
+
       photoDownloadQueue.push({
         turbineSn,
         bladeSn: String(bladeSn),
@@ -885,6 +896,36 @@ export async function processSnowExcel(
     } else {
       photosSkipped++
     }
+  }
+
+  // Add 1 Video row per unique blade with strict DF45-50 nomenclature
+  for (const [, bInfo] of uniqueBladesMap) {
+    const videoFileName = `B${bInfo.shortSn}_S1_SS_DF45-50.mp4`
+    const videoDamageDesc = [
+      'Inspection as per SN_241',
+      `Blade: S/N${bInfo.shortSn} Set ${bInfo.setNumber}`,
+      'Inspection number: 1',
+      'Type of Failure is Missing'
+    ].join('\n')
+
+    outWs.addRow([
+      bInfo.fullBladeSerial,         // A — Blade serial number
+      'Blade Inside - Shell',        // B — Sub Component
+      'Type of Failure is Missing',  // C — Failure Type
+      videoDamageDesc,               // D — Damage Description
+      45,                            // E — DF distance Start (STRICTLY 45)
+      50,                            // F — DF distance End (STRICTLY 50)
+      0,                             // G — Profile Depth Start
+      0,                             // H — Profile Depth End
+      'Inside',                      // I — Inside/Outside
+      'Section 1',                   // J — Blade section
+      'Shell',                       // K — Blade sub-section
+      'SS',                          // L — Blade area
+      0,                             // M — Size mm
+      videoFileName,                 // N — Video filename requirement
+      null,                          // O — Turbine SN
+      null                           // P — POI
+    ])
   }
 
   // Add 5 blank image rows
@@ -908,6 +949,7 @@ export async function processSnowExcel(
       null,                             // P
     ])
   }
+
 
   // Save the Excel file
   sendLog(`Gravando planilha em: ${path.basename(outExcelPath)}...`)

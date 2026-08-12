@@ -822,11 +822,23 @@ export function findLocalPhotosForDamage(localPhotosDir: string, data: DamageRep
           // Verifica se o nome do arquivo contém a distância do DF (ex: "df58.5")
           const hasDf = lower.includes(`df${dfStartStr}`)
 
-          if (hasSn && hasDf) {
-            if (lower.includes('pic1')) pic1Files.push(full)
-            else if (lower.includes('pic2')) pic2Files.push(full)
-            else if (isVid) videoFiles.push(full)
+          if (hasSn && (hasDf || isVid)) {
+            if (lower.includes('pic1')) {
+              pic1Files.push(full)
+            } else if (lower.includes('pic2')) {
+              pic2Files.push(full)
+            } else if (isVid) {
+              const targetName = `B${shortSn}_S1_SS_DF45-50.mp4`
+              const dst = path.join(os.tmpdir(), targetName)
+              try {
+                fs.copyFileSync(full, dst)
+                videoFiles.push(dst)
+              } catch {
+                videoFiles.push(full)
+              }
+            }
           }
+
         }
       }
     } catch {}
