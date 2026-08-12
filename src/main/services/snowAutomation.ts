@@ -18,6 +18,8 @@ import fs from 'fs'
 import os from 'os'
 import https from 'https'
 import http from 'http'
+import { SnowMappings } from './snowProcessor'
+
 
 export interface DamageReportRow {
   bladeSerialNumber: string // serial completo (13 dígitos) — bate com o combobox
@@ -204,42 +206,66 @@ class DamageEntryFiller {
     await field.fill(String(value))
   }
 
-  private async uploadPhotos(urls: string[], localPhotoFiles: string[] = []): Promise<void> {
+  private buildPhotoBaseName(data: DamageReportRow): string {
+    const shortSn = extractBladeSn(data.bladeSerialNumber)
+    const paddedBladeSn = String(shortSn).replace(/^B/i, '').padStart(4, '0')
+    const bladeCode = `B${paddedBladeSn}`
+
+    const areaCode = SnowMappings.areaToFileCode(data.bladeArea)
+
+    let secCode = 'S1'
+    if (data.bladeSection === 'Section 2') secCode = 'S2'
+    else if (data.bladeSection === 'Section 3') secCode = 'S3'
+    else if (data.bladeSection.match(/^Section\s*(\d+)$/i)) {
+      const match = data.bladeSection.match(/^Section\s*(\d+)$/i)
+      if (match) secCode = `S${match[1]}`
+    } else if (data.bladeSection.match(/^S\d+$/i)) {
+      secCode = data.bladeSection.toUpperCase()
+    }
+
+    return `${bladeCode}_${secCode}_${areaCode}_DF${data.dfDistanceStart}-${data.dfDistanceEnd}`
+  }
+
+  private async uploadPhotos(
+    data: DamageReportRow,
+    localPhotoFiles: string[] = []
+  ): Promise<void> {
     const tempPaths: string[] = []
+    const baseName = this.buildPhotoBaseName(data)
+
+
     try {
       if (localPhotoFiles && localPhotoFiles.length > 0) {
-        // Envia as fotos locais geradas pelo Módulo 23:
-        // pic1: foto com o polígono desenhado
-        // pic2: foto regional com o zoom do defeito
+        // Envia as fotos locais geradas pelo Módulo 23 no disco
         for (let i = 0; i < localPhotoFiles.length; i++) {
           const srcPath = localPhotoFiles[i]
-          const ext = path.extname(srcPath) || '.jpeg'
-          const dstPath = path.join(
-            os.tmpdir(),
-            `${String(i + 1).padStart(2, '0')}_arthwind_${Date.now()}_${i}${ext}`
-          )
+          const isPic2 = srcPath.toLowerCase().includes('pic2')
+          const prefix = isPic2 ? '02' : '01'
+          const suffix = isPic2 ? '_pic2.jpeg' : '_pic1.jpeg'
+          const fileName = `${prefix}_${baseName}${suffix}`
+          const dstPath = path.join(os.tmpdir(), fileName)
           fs.copyFileSync(srcPath, dstPath)
           tempPaths.push(dstPath)
         }
-        this.log(`  Enviando ${tempPaths.length} foto(s) gerada(s) pelo Módulo 23 (polígono + região)...`)
-      } else if (urls && urls.length > 0) {
-        // Fallback: faz o download das fotos a partir dos links da nuvem
-        for (let i = 0; i < urls.length; i++) {
-          const p = path.join(
-            os.tmpdir(),
-            `${String(i + 1).padStart(2, '0')}_arthwind_${Date.now()}_${i}.jpg`
-          )
-          const buffer = await fetchBuffer(urls[i])
+        this.log(`  Enviando ${tempPaths.length} foto(s) locais do Módulo 23 (${tempPaths.map(p => path.basename(p)).join(', ')})...`)
+      } else if (data.photoUrls && data.photoUrls.length > 0) {
+        // Fallback: faz o download das fotos a partir dos links da nuvem com nome oficial formatado
+        for (let i = 0; i < data.photoUrls.length; i++) {
+          const prefix = String(i + 1).padStart(2, '0')
+          const suffix = i === 1 ? '_pic2.jpeg' : '_pic1.jpeg'
+          const fileName = `${prefix}_${baseName}${suffix}`
+          const p = path.join(os.tmpdir(), fileName)
+          const buffer = await fetchBuffer(data.photoUrls[i])
           fs.writeFileSync(p, buffer)
           tempPaths.push(p)
         }
-        this.log(`  Enviando ${tempPaths.length} foto(s) baixada(s) do link...`)
+        this.log(`  Enviando ${tempPaths.length} foto(s) baixada(s) com nomenclatura oficial (${tempPaths.map(p => path.basename(p)).join(', ')})...`)
       }
 
       if (tempPaths.length > 0) {
         const scope = this.getScope()
 
-        // No ServiceNow, o botão "Add attachments" (📎) ativa e exibe a zona de upload
+        // 1. Clica no botão "Add attachments" (📎) no ServiceNow para ativar a zona de upload
         const attachmentBtn = scope
           .locator('.attachment-button, [title*="attachment"]')
           .or(scope.getByText(/add attachments/i))
@@ -251,6 +277,7 @@ class DamageEntryFiller {
           await this.page.waitForTimeout(300)
         }
 
+        // 2. Injeta os arquivos formatados no input[type="file"]
         const fileInput = scope.locator('input[type="file"]').last().or(scope.locator('input[type="file"]').first())
         await fileInput.setInputFiles(tempPaths)
         this.log(`  ✓ ${tempPaths.length} foto(s) anexada(s) com sucesso!`)
@@ -288,17 +315,17 @@ class DamageEntryFiller {
             await setOptionalCheckbox.click({ force: true })
           })
           this.log(`    ✓ Checkbox 'Set Optional Fields' marcado.`)
-          await this.page.waitForTimeout(400)
+          await this.page.waitForTimeout(500)
         }
       } else {
         await scope.getByText(/set optional fields/i).first().click({ force: true }).catch(() => {})
-        await this.page.waitForTimeout(400)
+        await this.page.waitForTimeout(500)
       }
 
       // Se a opção SN_241 já está presente na tabela Optional Fields, não adiciona de novo
       const alreadyAdded = await scope.getByText(/SN_241|NR81\.5/i).first().isVisible({ timeout: 1000 }).catch(() => false)
       if (alreadyAdded) {
-        this.log(`    ✓ Opção SN_241 já está presente em Optional Fields.`)
+        this.log(`    ✓ Opção SN_241 já está presente na tabela Optional Fields.`)
         return
       }
 
@@ -318,14 +345,14 @@ class DamageEntryFiller {
         await scope.getByText(/^add$/i).first().click({ force: true }).catch(() => {})
       }
 
-      this.log(`    ✓ Clicado no botão Add para abrir a modal 'Add Row'`)
+      this.log(`    ✓ Clicado no botão Add. Aguardando a modal 'Add Row'...`)
       await this.page.waitForTimeout(600)
 
-      // 3. Modal "Add Row"
-      const modal = scope.locator('.modal-dialog, .modal-content, [role="dialog"]').first()
+      // 3. Modal "Add Row" (busca na página global para encontrar a modal e a lista Select2 anexada ao document.body)
+      const modal = this.page.locator('.modal-dialog, .modal-content, [role="dialog"]').first()
       await modal.waitFor({ state: 'visible', timeout: 5000 })
 
-      // Preenche o campo "Option" no modal (Select2)
+      // Clica no campo "Option" no modal (Select2)
       const optionField = modal
         .locator('.select2-choice')
         .or(modal.getByRole('combobox', { name: /option/i }))
@@ -335,22 +362,21 @@ class DamageEntryFiller {
       await optionField.click({ force: true })
       await this.page.waitForTimeout(300)
 
-      // Digita "241" na caixa de busca do Select2
-      const searchBox = scope
-        .locator('.select2-input, input.select2-search, input[role="combobox"]')
+      // Digita "241" na caixa de busca do Select2 visível no body
+      const searchBox = this.page
+        .locator('.select2-input:visible, input.select2-search:visible, input[role="combobox"]:visible')
         .last()
-        .or(scope.getByRole('textbox').last())
 
-      if (await searchBox.isVisible({ timeout: 1500 }).catch(() => false)) {
+      if (await searchBox.isVisible({ timeout: 2000 }).catch(() => false)) {
         await searchBox.fill(optionSearchText)
         await this.page.waitForTimeout(400)
       }
 
-      // Clicar na opção "SN_241 - Inspection of NR81.5 Blades in Service"
-      const optionItem = scope
-        .locator('.select2-result-label', { hasText: /241|SN_241/i })
-        .or(scope.getByRole('option', { name: /241|SN_241/i }))
-        .or(scope.getByText(/SN_241/i))
+      // Clicar na opção "SN_241 - Inspection of NR81.5 Blades in Service" visível no body
+      const optionItem = this.page
+        .locator('.select2-result-label:visible, li.select2-result:visible', { hasText: /241|SN_241/i })
+        .or(this.page.getByRole('option', { name: /241|SN_241/i }))
+        .or(this.page.getByText(/SN_241/i))
         .first()
 
       await optionItem.click({ force: true })
@@ -419,7 +445,8 @@ class DamageEntryFiller {
 
     // Busca fotos locais geradas pelo Módulo 23 (_pic1.jpeg com polígono e _pic2.jpeg regional)
     const localPhotos = localPhotosDir ? findLocalPhotosForDamage(localPhotosDir, data) : []
-    await this.uploadPhotos(data.photoUrls, localPhotos)
+    await this.uploadPhotos(data, localPhotos)
+
 
     // Submissão do formulário: somente realizada se autoSubmit for true
     if (autoSubmit) {
