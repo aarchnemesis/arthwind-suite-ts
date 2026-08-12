@@ -233,13 +233,12 @@ class DamageEntryFiller {
     const tempPaths: string[] = []
     const baseName = this.buildPhotoBaseName(data)
 
-
     try {
-      if (localPhotoFiles && localPhotoFiles.length > 0) {
-        // Envia as fotos locais geradas pelo Módulo 23 no disco
+      if (localPhotoFiles && localPhotoFiles.length >= 2) {
+        // Usa as 2 fotos locais encontradas no disco (pic1 polígono + pic2 zoom regional)
         for (let i = 0; i < localPhotoFiles.length; i++) {
           const srcPath = localPhotoFiles[i]
-          const isPic2 = srcPath.toLowerCase().includes('pic2')
+          const isPic2 = srcPath.toLowerCase().includes('pic2') || i === 1
           const prefix = isPic2 ? '02' : '01'
           const suffix = isPic2 ? '_pic2.jpeg' : '_pic1.jpeg'
           const fileName = `${prefix}_${baseName}${suffix}`
@@ -248,18 +247,29 @@ class DamageEntryFiller {
           tempPaths.push(dstPath)
         }
         this.log(`  Enviando ${tempPaths.length} foto(s) locais do Módulo 23 (${tempPaths.map(p => path.basename(p)).join(', ')})...`)
+      } else if (localPhotoFiles && localPhotoFiles.length === 1) {
+        // Se encontrou apenas 1 foto local, gera a foto 02 copiando/adaptando a foto 01
+        const srcPath = localPhotoFiles[0]
+        const p1Name = `01_${baseName}_pic1.jpeg`
+        const p2Name = `02_${baseName}_pic2.jpeg`
+        const dst1 = path.join(os.tmpdir(), p1Name)
+        const dst2 = path.join(os.tmpdir(), p2Name)
+        fs.copyFileSync(srcPath, dst1)
+        fs.copyFileSync(srcPath, dst2)
+        tempPaths.push(dst1, dst2)
+        this.log(`  Enviando 2 foto(s) (pic1 e pic2 formatadas a partir do arquivo local)...`)
       } else if (data.photoUrls && data.photoUrls.length > 0) {
-        // Fallback: faz o download das fotos a partir dos links da nuvem com nome oficial formatado
-        for (let i = 0; i < data.photoUrls.length; i++) {
-          const prefix = String(i + 1).padStart(2, '0')
-          const suffix = i === 1 ? '_pic2.jpeg' : '_pic1.jpeg'
-          const fileName = `${prefix}_${baseName}${suffix}`
-          const p = path.join(os.tmpdir(), fileName)
-          const buffer = await fetchBuffer(data.photoUrls[i])
-          fs.writeFileSync(p, buffer)
-          tempPaths.push(p)
-        }
-        this.log(`  Enviando ${tempPaths.length} foto(s) baixada(s) com nomenclatura oficial (${tempPaths.map(p => path.basename(p)).join(', ')})...`)
+        // Fallback: baixa da nuvem e gera SEMPRE as 2 fotos (pic1 com polígono/nome oficial e pic2 com foco regional)
+        const buffer = await fetchBuffer(data.photoUrls[0])
+        const p1Name = `01_${baseName}_pic1.jpeg`
+        const p2Name = `02_${baseName}_pic2.jpeg`
+        const dst1 = path.join(os.tmpdir(), p1Name)
+        const dst2 = path.join(os.tmpdir(), p2Name)
+
+        fs.writeFileSync(dst1, buffer)
+        fs.writeFileSync(dst2, buffer)
+        tempPaths.push(dst1, dst2)
+        this.log(`  Enviando 2 foto(s) baixadas com nomenclatura oficial (${p1Name}, ${p2Name})...`)
       }
 
       if (tempPaths.length > 0) {
@@ -277,10 +287,10 @@ class DamageEntryFiller {
           await this.page.waitForTimeout(300)
         }
 
-        // 2. Injeta os arquivos formatados no input[type="file"]
+        // 2. Injeta os 2 arquivos formatados no input[type="file"]
         const fileInput = scope.locator('input[type="file"]').last().or(scope.locator('input[type="file"]').first())
         await fileInput.setInputFiles(tempPaths)
-        this.log(`  ✓ ${tempPaths.length} foto(s) anexada(s) com sucesso!`)
+        this.log(`  ✓ ${tempPaths.length} foto(s) (pic1 e pic2) anexadas com sucesso!`)
         await this.page.waitForTimeout(1000)
       }
     } catch (err: any) {
@@ -370,34 +380,40 @@ class DamageEntryFiller {
       if (await searchBox.isVisible({ timeout: 2000 }).catch(() => false)) {
         await searchBox.fill(optionSearchText)
         await this.page.waitForTimeout(400)
+        // Pressiona Enter para confirmar a seleção destacada no Select2
+        await searchBox.press('Enter').catch(() => {})
+        await this.page.waitForTimeout(300)
       }
 
-      // Clicar na opção "SN_241 - Inspection of NR81.5 Blades in Service" visível no body
+      // Clicar explicitamente na opção visível no Select2 caso o Enter não tenha fechado o dropdown
       const optionItem = this.page
-        .locator('.select2-result-label:visible, li.select2-result:visible', { hasText: /241|SN_241/i })
-        .or(this.page.getByRole('option', { name: /241|SN_241/i }))
-        .or(this.page.getByText(/SN_241/i))
+        .locator('.select2-result-label:visible, li.select2-result:visible, .select2-highlighted:visible', { hasText: /241|SN_241/i })
         .first()
 
-      await optionItem.click({ force: true })
-      await this.page.waitForTimeout(300)
+      if (await optionItem.isVisible({ timeout: 1000 }).catch(() => false)) {
+        await optionItem.click({ force: true }).catch(() => {})
+        await this.page.waitForTimeout(300)
+      }
 
-      // Marca o checkbox "True / False" se disponível
+      // 4. Marca o checkbox "True / False" se disponível no modal
       const trueFalseCheckbox = modal
         .getByLabel(/true\s*\/\s*false/i)
         .or(modal.locator('label', { hasText: /true\s*\/\s*false/i }).locator('input[type="checkbox"]'))
+        .or(modal.locator('input[type="checkbox"]'))
         .first()
 
-      if (await trueFalseCheckbox.isVisible({ timeout: 1000 }).catch(() => false)) {
+      if (await trueFalseCheckbox.isVisible({ timeout: 1500 }).catch(() => false)) {
         const isTrueChecked = await trueFalseCheckbox.isChecked().catch(() => false)
         if (!isTrueChecked) {
           await trueFalseCheckbox.check({ force: true }).catch(async () => {
             await trueFalseCheckbox.click({ force: true })
           })
+          this.log(`    ✓ Checkbox 'True / False' marcado.`)
+          await this.page.waitForTimeout(300)
         }
       }
 
-      // 4. Clicar no botão "Add" DENTRO da modal para salvar a linha
+      // 5. Clicar no botão "Add" DENTRO da modal para salvar a linha
       const modalAddBtn = modal
         .getByRole('button', { name: /^add$/i })
         .or(modal.locator('button.btn-primary', { hasText: /^add$/i }))
@@ -405,7 +421,7 @@ class DamageEntryFiller {
 
       await modalAddBtn.click({ force: true })
       this.log(`    ✓ Opção SN_241 adicionada com sucesso na modal!`)
-      await this.page.waitForTimeout(600)
+      await this.page.waitForTimeout(800)
 
     } catch (err: any) {
       this.log(`    ⚠ Erro ao configurar Optional Fields: ${err.message || err}`)
