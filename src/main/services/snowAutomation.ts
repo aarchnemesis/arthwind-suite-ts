@@ -18,8 +18,8 @@ import fs from 'fs'
 import os from 'os'
 import https from 'https'
 import http from 'http'
+import sharp from 'sharp'
 import { SnowMappings } from './snowProcessor'
-
 
 export interface DamageReportRow {
   bladeSerialNumber: string // serial completo (13 dígitos) — bate com o combobox
@@ -37,7 +37,9 @@ export interface DamageReportRow {
   sizeMm: number
   amountOfFindings: number // sempre 1
   photoUrls: string[] // 1+ fotos — sobem numeradas 01_/02_/... (form pede isso pra sequência)
+  isBlankImage?: boolean
 }
+
 
 type LogFn = (msg: string) => void
 
@@ -97,7 +99,33 @@ function fetchBuffer(url: string): Promise<Buffer> {
   })
 }
 
+export async function ensureBlankImageFile(localPhotosDir?: string): Promise<string> {
+  if (localPhotosDir && fs.existsSync(localPhotosDir)) {
+    const candidates = ['Blank Image.jpg', 'blank_image.jpg', 'Blank Image.jpeg', 'blank.jpg']
+    for (const cand of candidates) {
+      const p = path.join(localPhotosDir, cand)
+      if (fs.existsSync(p)) return p
+    }
+  }
+
+  const dst = path.join(os.tmpdir(), 'Blank Image.jpg')
+  if (!fs.existsSync(dst)) {
+    try {
+      await sharp({
+        create: {
+          width: 800,
+          height: 600,
+          channels: 3,
+          background: { r: 255, g: 255, b: 255 }
+        }
+      }).jpeg({ quality: 80 }).toFile(dst)
+    } catch {}
+  }
+  return dst
+}
+
 // ─── Preenchimento do formulário ─────────────────────────────────────────────
+
 
 class DamageEntryFiller {
   constructor(
@@ -233,7 +261,16 @@ class DamageEntryFiller {
     const tempPaths: string[] = []
 
     try {
-      if (localPhotoFiles && localPhotoFiles.length > 0) {
+      if (data.isBlankImage) {
+        const blankPath = await ensureBlankImageFile()
+        const dst1 = path.join(os.tmpdir(), 'Blank Image.jpg')
+        if (blankPath !== dst1) {
+          fs.copyFileSync(blankPath, dst1)
+        }
+        tempPaths.push(dst1, dst1)
+        this.log(`  Enviando 2 foto(s) Blank Image...`)
+      } else if (localPhotoFiles && localPhotoFiles.length > 0) {
+
         // Preserva 100% ESTRITAMENTE a nomenclatura original do Módulo 23 (ex: B0414_S2_PS_DF59.2-59.2_pic1.jpeg)
         for (const srcPath of localPhotoFiles) {
           const originalName = path.basename(srcPath)
@@ -257,6 +294,7 @@ class DamageEntryFiller {
         tempPaths.push(dst1, dst2)
         this.log(`  Enviando 2 foto(s) com nomes estritos (${p1Name}, ${p2Name})...`)
       }
+
 
       if (tempPaths.length > 0) {
         const scope = this.getScope()
@@ -533,15 +571,24 @@ async function readDamageRows(excelPath: string): Promise<DamageReportRow[]> {
   await wb.xlsx.readFile(excelPath)
   const ws = wb.worksheets[0]
   const rows: DamageReportRow[] = []
+  let lastValidBladeSerial = ''
 
   for (let r = 2; r <= ws.rowCount; r++) {
     const row = ws.getRow(r)
-    const bladeSerial = String(row.getCell(1).value ?? '').trim()
+    const rawBlade = String(row.getCell(1).value ?? '').trim()
+    if (!rawBlade) continue
+
+    let isBlankImage = false
+    let bladeSerial = rawBlade
+
+    if (rawBlade.toLowerCase() === 'blank image') {
+      isBlankImage = true
+      bladeSerial = lastValidBladeSerial
+    } else {
+      lastValidBladeSerial = rawBlade
+    }
+
     if (!bladeSerial) continue
-    // As 5 linhas "Blank Image" que o SNOW Processor sempre anexa no fim (placeholder
-    // exigido pelo procedimento, não é dano real de nenhuma pá) não têm serial real —
-    // tentar selecionar isso no combobox "Blade serial number" sempre falharia.
-    if (bladeSerial.toLowerCase() === 'blank image') continue
 
     const photoLinkRaw = String(row.getCell(14).value ?? '').trim()
     const photoUrls = photoLinkRaw
@@ -575,7 +622,8 @@ async function readDamageRows(excelPath: string): Promise<DamageReportRow[]> {
       bladeArea: String(row.getCell(12).value ?? '').trim(),
       sizeMm: Number(row.getCell(13).value ?? 0),
       amountOfFindings: 1,
-      photoUrls
+      photoUrls,
+      isBlankImage
     })
   }
   return rows
@@ -626,11 +674,20 @@ export async function getSpreadsheetBlades(
     await wb.xlsx.readFile(excelPath)
     const ws = wb.worksheets[0]
     const map = new Map<string, BladeSummary>()
+    let lastValidBladeSerial = ''
 
     for (let r = 2; r <= ws.rowCount; r++) {
       const row = ws.getRow(r)
-      const bladeSerial = String(row.getCell(1).value ?? '').trim()
-      if (!bladeSerial || bladeSerial.toLowerCase() === 'blank image') continue
+      const rawBlade = String(row.getCell(1).value ?? '').trim()
+      if (!rawBlade) continue
+
+      let bladeSerial = rawBlade
+      if (rawBlade.toLowerCase() === 'blank image') {
+        if (!lastValidBladeSerial) continue
+        bladeSerial = lastValidBladeSerial
+      } else {
+        lastValidBladeSerial = rawBlade
+      }
 
       // Extrai S/N de 4 dígitos exatos (ex.: "A1 811 0410 0115" -> "0410")
       const shortSn = extractBladeSn(bladeSerial)
