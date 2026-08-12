@@ -756,10 +756,7 @@ export interface RunAutomationOptions {
   selectedBlades?: string[] // Lista de seriais de pás selecionados para processar
   localPhotosDir?: string // Pasta local com as fotos geradas pelo Módulo 23 (contendo _pic1 e _pic2)
   autoSubmit?: boolean // Se true, clica em Submit no formulário. Padrão: false.
-  concurrency?: number // Quantidade de abas simultâneas em paralelo (padrão: 5)
 }
-
-
 
 export interface RunAutomationResult {
   success: boolean
@@ -770,6 +767,7 @@ export interface RunAutomationResult {
 }
 
 export async function runSnowDamageAutomation(
+
   excelPath: string,
   incidentUrl: string,
   options: RunAutomationOptions,
@@ -804,113 +802,78 @@ export async function runSnowDamageAutomation(
     const end = Math.min(filteredRows.length, options.endRow ?? filteredRows.length)
     const rows = filteredRows.slice(start, end)
 
-    const concurrency = Math.max(1, options.concurrency ?? 5)
     const autoSubmit = options.autoSubmit ?? false
 
-    log(`${rows.length} linha(s) a processar (${concurrency} aba(s) simultânea(s), autoSubmit: ${autoSubmit ? 'SIM' : 'NÃO'}).`)
+    log(`${rows.length} linha(s) a processar (Modo: ${autoSubmit ? 'Submissão Automática' : 'Conferência Manual'}).`)
 
     const context = await getContext(options.headless ?? false)
+    const page = context.pages().find((p) => !p.isClosed()) || (await context.newPage())
+
     let processed = 0
     let failed = 0
     const errors: string[] = []
 
-    // Processamento em lotes de janelas simultâneas (tamanho `concurrency`)
-    for (let batchStart = 0; batchStart < rows.length; batchStart += concurrency) {
-      const batch = rows.slice(batchStart, batchStart + concurrency)
-      log(`⚡ Iniciando lote de ${batch.length} janela(s) simultânea(s)...`)
-
-      const batchPromises = batch.map(async (row, batchIdx) => {
-        const itemIdx = batchStart + batchIdx + 1
-        const prefix = `[Janela ${batchIdx + 1}/${batch.length} | Defeito ${itemIdx}/${rows.length}]`
-
-        // Posicionamento em grade para abrir janelas separadas no desktop
-        const left = (batchIdx % 3) * 420
-        const top = Math.floor(batchIdx / 3) * 320
-        const windowFeatures = `width=1180,height=820,left=${left},top=${top}`
-
-        let page: Page
-        try {
-          const mainPage = context.pages().find((p) => !p.isClosed()) || (await context.newPage())
-          if (batchIdx === 0 && context.pages().length === 1 && mainPage.url() === 'about:blank') {
-            page = mainPage
-            await page.goto(incidentUrl, { waitUntil: 'domcontentloaded' })
-          } else {
-            const [popup] = await Promise.all([
-              mainPage.waitForEvent('popup', { timeout: 12000 }),
-              mainPage.evaluate(
-                ({ url, features }) => window.open(url, '_blank', features),
-                { url: incidentUrl, features: windowFeatures }
-              )
-            ])
-            page = popup
-          }
-
-          await page.bringToFront().catch(() => {})
-          if (!page.url().startsWith(incidentUrl)) {
-            await page.goto(incidentUrl, { waitUntil: 'domcontentloaded' })
-          }
-
-          // Clicar em "Create Damage Entry" na janela correspondente
-          const scopes = [page, ...page.frames()]
-          let clickedAdd = false
-
-          for (const s of scopes) {
-            const locators = [
-              s.getByRole('button', { name: /create damage entry|add damage entry|nova entrada|criar dano|new damage/i }),
-              s.getByRole('link', { name: /create damage entry|add damage entry|nova entrada|criar dano|new damage/i }),
-              s.getByText(/create damage entry|add damage entry|nova entrada|criar dano/i).first()
-            ]
-            for (const loc of locators) {
-              try {
-                if (await loc.isVisible({ timeout: 1500 }).catch(() => false)) {
-                  await loc.click()
-                  clickedAdd = true
-                  break
-                }
-              } catch {
-                /* tenta próximo */
-              }
-            }
-            if (clickedAdd) break
-          }
-
-          if (!clickedAdd) {
-            await page.getByRole('button', { name: /create damage entry|add damage entry/i }).click({ timeout: 5000 }).catch(() => {})
-          }
-
-          const activeScope = page.frames().find((f) => f.name() === 'gsft_main' || f.url().includes('.do')) || page
-          await activeScope.getByLabel('Blade serial number', { exact: false }).first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {})
-
-          // Cruza a linha atual com o mapa pré-indexado de fotos
-          const localPhotos = options.localPhotosDir
-            ? findLocalPhotosFromMap(photosMap, row)
-            : []
-
-          const filler = new DamageEntryFiller(page, (m) => log(`  ${prefix} ${m}`))
-          await filler.fill(row, localPhotos, autoSubmit)
-
-          processed++
-          log(`✓ ${prefix} OK: ${row.bladeSerialNumber} — ${row.failureType}`)
-
-          if (autoSubmit) {
-            await page.close().catch(() => {})
-          }
-        } catch (err: any) {
-          failed++
-          const msg = `✗ ${prefix} FALHOU: ${row.bladeSerialNumber} — ${row.failureType}: ${err.message}`
-          errors.push(msg)
-          log(msg)
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]
+      const prefix = `[${i + 1}/${rows.length}]`
+      try {
+        if (!page.url().startsWith(incidentUrl)) {
+          await page.goto(incidentUrl, { waitUntil: 'domcontentloaded' })
         }
-      })
 
-      await Promise.all(batchPromises)
+        // Clicar em "Create Damage Entry"
+        const scopes = [page, ...page.frames()]
+        let clickedAdd = false
 
-      if (!autoSubmit) {
-        log(`ℹ Lote de ${batch.length} formulário(s) preenchido(s) com sucesso e mantido(s) aberto(s) em ${batch.length} janela(s) separadas para sua revisão!`)
-        break
+        for (const s of scopes) {
+          const locators = [
+            s.getByRole('button', { name: /create damage entry|add damage entry|nova entrada|criar dano|new damage/i }),
+            s.getByRole('link', { name: /create damage entry|add damage entry|nova entrada|criar dano|new damage/i }),
+            s.getByText(/create damage entry|add damage entry|nova entrada|criar dano/i).first()
+          ]
+          for (const loc of locators) {
+            try {
+              if (await loc.isVisible({ timeout: 1500 }).catch(() => false)) {
+                await loc.click()
+                clickedAdd = true
+                break
+              }
+            } catch {
+              /* tenta próximo */
+            }
+          }
+          if (clickedAdd) break
+        }
+
+        if (!clickedAdd) {
+          await page.getByRole('button', { name: /create damage entry|add damage entry/i }).click({ timeout: 5000 }).catch(() => {})
+        }
+
+        const activeScope = page.frames().find((f) => f.name() === 'gsft_main' || f.url().includes('.do')) || page
+        await activeScope.getByLabel('Blade serial number', { exact: false }).first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {})
+
+        // Cruza a linha atual com o mapa pré-indexado de fotos
+        const localPhotos = options.localPhotosDir
+          ? findLocalPhotosFromMap(photosMap, row)
+          : []
+
+        const filler = new DamageEntryFiller(page, (m) => log(`  ${prefix} ${m}`))
+        await filler.fill(row, localPhotos, autoSubmit)
+
+        processed++
+        log(`✓ ${prefix} OK: ${row.bladeSerialNumber} — ${row.failureType}`)
+
+        if (!autoSubmit) {
+          log(`ℹ Modo conferência manual ativo: o formulário foi preenchido com sucesso e mantido aberto no navegador para sua revisão.`)
+          break
+        }
+      } catch (err: any) {
+        failed++
+        const msg = `✗ ${prefix} FALHOU: ${row.bladeSerialNumber} — ${row.failureType}: ${err.message}`
+        errors.push(msg)
+        log(msg)
       }
     }
-
 
     log(`Concluído: ${processed} ok, ${failed} falha(s) de ${rows.length}.`)
     return { success: true, processed, failed, errors }
@@ -918,4 +881,5 @@ export async function runSnowDamageAutomation(
     return { success: false, processed: 0, failed: 0, errors: [], error: err.message }
   }
 }
+
 
