@@ -14,12 +14,12 @@ export default function SnowAutomationModule({ D }) {
   const [incidentUrl, setIncidentUrl] = useState('');
   const [headless, setHeadless] = useState(false);
   const [autoSubmit, setAutoSubmit] = useState(false);
+  const [includeBlankImages, setIncludeBlankImages] = useState(false);
   const [skipSubmitted, setSkipSubmitted] = useState(true);
   const [processOnlyVideos, setProcessOnlyVideos] = useState(false);
   const [startRow, setStartRow] = useState('');
-
-
   const [endRow, setEndRow] = useState('');
+
 
   const [blades, setBlades] = useState([]);
   const [selectedBlades, setSelectedBlades] = useState([]);
