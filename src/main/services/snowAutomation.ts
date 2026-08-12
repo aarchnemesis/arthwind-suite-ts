@@ -231,51 +231,37 @@ class DamageEntryFiller {
     localPhotoFiles: string[] = []
   ): Promise<void> {
     const tempPaths: string[] = []
-    const baseName = this.buildPhotoBaseName(data)
 
     try {
-      if (localPhotoFiles && localPhotoFiles.length >= 2) {
-        // Usa as 2 fotos locais encontradas no disco (pic1 polígono + pic2 zoom regional)
-        for (let i = 0; i < localPhotoFiles.length; i++) {
-          const srcPath = localPhotoFiles[i]
-          const isPic2 = srcPath.toLowerCase().includes('pic2') || i === 1
-          const prefix = isPic2 ? '02' : '01'
-          const suffix = isPic2 ? '_pic2.jpeg' : '_pic1.jpeg'
-          const fileName = `${prefix}_${baseName}${suffix}`
-          const dstPath = path.join(os.tmpdir(), fileName)
+      if (localPhotoFiles && localPhotoFiles.length > 0) {
+        // Preserva 100% ESTRITAMENTE a nomenclatura original do Módulo 23 (ex: B0414_S2_PS_DF59.2-59.2_pic1.jpeg)
+        for (const srcPath of localPhotoFiles) {
+          const originalName = path.basename(srcPath)
+          const dstPath = path.join(os.tmpdir(), originalName)
           fs.copyFileSync(srcPath, dstPath)
           tempPaths.push(dstPath)
         }
-        this.log(`  Enviando ${tempPaths.length} foto(s) locais do Módulo 23 (${tempPaths.map(p => path.basename(p)).join(', ')})...`)
-      } else if (localPhotoFiles && localPhotoFiles.length === 1) {
-        // Se encontrou apenas 1 foto local, gera a foto 02 copiando/adaptando a foto 01
-        const srcPath = localPhotoFiles[0]
-        const p1Name = `01_${baseName}_pic1.jpeg`
-        const p2Name = `02_${baseName}_pic2.jpeg`
-        const dst1 = path.join(os.tmpdir(), p1Name)
-        const dst2 = path.join(os.tmpdir(), p2Name)
-        fs.copyFileSync(srcPath, dst1)
-        fs.copyFileSync(srcPath, dst2)
-        tempPaths.push(dst1, dst2)
-        this.log(`  Enviando 2 foto(s) (pic1 e pic2 formatadas a partir do arquivo local)...`)
+        this.log(`  Enviando ${tempPaths.length} foto(s) com nomes estritos do Módulo 23 (${tempPaths.map(p => path.basename(p)).join(', ')})...`)
       } else if (data.photoUrls && data.photoUrls.length > 0) {
-        // Fallback: baixa da nuvem e gera SEMPRE as 2 fotos (pic1 com polígono/nome oficial e pic2 com foco regional)
+        // Fallback da nuvem: gera pic1 e pic2 com o nome estrito oficial do Módulo 23 (SEM prefixo 01_ ou 02_)
+        const baseName = this.buildPhotoBaseName(data)
         const buffer = await fetchBuffer(data.photoUrls[0])
-        const p1Name = `01_${baseName}_pic1.jpeg`
-        const p2Name = `02_${baseName}_pic2.jpeg`
+
+        const p1Name = `${baseName}_pic1.jpeg`
+        const p2Name = `${baseName}_pic2.jpeg`
         const dst1 = path.join(os.tmpdir(), p1Name)
         const dst2 = path.join(os.tmpdir(), p2Name)
 
         fs.writeFileSync(dst1, buffer)
         fs.writeFileSync(dst2, buffer)
         tempPaths.push(dst1, dst2)
-        this.log(`  Enviando 2 foto(s) baixadas com nomenclatura oficial (${p1Name}, ${p2Name})...`)
+        this.log(`  Enviando 2 foto(s) com nomes estritos (${p1Name}, ${p2Name})...`)
       }
 
       if (tempPaths.length > 0) {
         const scope = this.getScope()
 
-        // 1. Clica no botão "Add attachments" (📎) no ServiceNow para ativar a zona de upload
+        // 1. Clica no botão "Add attachments" (📎) no ServiceNow para ativar o input
         const attachmentBtn = scope
           .locator('.attachment-button, [title*="attachment"]')
           .or(scope.getByText(/add attachments/i))
@@ -287,10 +273,10 @@ class DamageEntryFiller {
           await this.page.waitForTimeout(300)
         }
 
-        // 2. Injeta os 2 arquivos formatados no input[type="file"]
+        // 2. Injeta os caminhos exatos dos arquivos diretamente via setInputFiles
         const fileInput = scope.locator('input[type="file"]').last().or(scope.locator('input[type="file"]').first())
         await fileInput.setInputFiles(tempPaths)
-        this.log(`  ✓ ${tempPaths.length} foto(s) (pic1 e pic2) anexadas com sucesso!`)
+        this.log(`  ✓ ${tempPaths.length} foto(s) anexadas diretamente sem abrir o Explorer!`)
         await this.page.waitForTimeout(1000)
       }
     } catch (err: any) {
@@ -305,6 +291,7 @@ class DamageEntryFiller {
       }
     }
   }
+
 
   private async addOptionalFields(optionSearchText: string = '241'): Promise<void> {
     const scope = this.getScope()
@@ -428,7 +415,7 @@ class DamageEntryFiller {
     }
   }
 
-  async fill(data: DamageReportRow, localPhotosDir?: string, autoSubmit: boolean = false): Promise<void> {
+  async fill(data: DamageReportRow, localPhotoFiles: string[] = [], autoSubmit: boolean = false): Promise<void> {
     this.log(
       `Preenchendo: ${data.bladeSerialNumber} | ${data.subComponent} | ${data.failureType} | DF ${data.dfDistanceStart}-${data.dfDistanceEnd}`
     )
@@ -459,9 +446,9 @@ class DamageEntryFiller {
     // Preenche a caixa de Optional fields (opções: SN_241) e clica no botão Add
     await this.addOptionalFields('241')
 
-    // Busca fotos locais geradas pelo Módulo 23 (_pic1.jpeg com polígono e _pic2.jpeg regional)
-    const localPhotos = localPhotosDir ? findLocalPhotosForDamage(localPhotosDir, data) : []
-    await this.uploadPhotos(data, localPhotos)
+    // Anexa as fotos com nomes estritos do Módulo 23
+    await this.uploadPhotos(data, localPhotoFiles)
+
 
 
     // Submissão do formulário: somente realizada se autoSubmit for true
@@ -631,16 +618,19 @@ export async function getSpreadsheetBlades(
 
 // ─── Busca de Fotos Locais Geradas pelo Módulo 23 ───────────────────────────
 
-function findLocalPhotosForDamage(localPhotosDir: string, data: DamageReportRow): string[] {
-  if (!localPhotosDir || !fs.existsSync(localPhotosDir)) return []
+export interface LocalPhotoPair {
+  pic1Path?: string
+  pic2Path?: string
+}
 
-  // S/N de 4 dígitos exatos (ex: "A1 811 0410 0115" -> "0410")
-  const shortSn = extractBladeSn(data.bladeSerialNumber)
-
-  // Padrão do DF (ex: "DF59-59.1" ou "DF59-59")
-  const dfPattern = `DF${data.dfDistanceStart}-${data.dfDistanceEnd}`
-
-  const matches: string[] = []
+/**
+ * Mapeia previamente a pasta Fotos/ gerada pelo Módulo 23 no início da automação.
+ * Indexa cada defeito pelas chaves (ex.: "0414_df59.2-59.2" ou "0414_df59.2")
+ * com os caminhos absolutos exatos das fotos pic1.jpeg e pic2.jpeg no disco.
+ */
+export function buildLocalPhotosMap(localPhotosDir: string): Map<string, LocalPhotoPair> {
+  const map = new Map<string, LocalPhotoPair>()
+  if (!localPhotosDir || !fs.existsSync(localPhotosDir)) return map
 
   function scan(dir: string) {
     try {
@@ -651,30 +641,91 @@ function findLocalPhotosForDamage(localPhotosDir: string, data: DamageReportRow)
           scan(full)
         } else if (item.isFile()) {
           const lower = item.name.toLowerCase()
-          if (
-            (lower.includes('pic1') || lower.includes('pic2')) &&
-            (lower.includes(dfPattern.toLowerCase()) || lower.includes(`df${data.dfDistanceStart}`)) &&
-            (!shortSn || lower.includes(shortSn.toLowerCase()))
-          ) {
-            matches.push(full)
+          if (!lower.endsWith('.jpeg') && !lower.endsWith('.jpg') && !lower.endsWith('.png')) continue
+
+          const shortSn = extractBladeSn(item.name).toLowerCase()
+          const dfMatch = lower.match(/df[\d\.\-]+/)
+          const dfKey = dfMatch ? dfMatch[0] : ''
+
+          if (shortSn && dfKey) {
+            const key = `${shortSn}_${dfKey}`
+            if (!map.has(key)) {
+              map.set(key, {})
+            }
+            const entry = map.get(key)!
+            if (lower.includes('pic1')) {
+              entry.pic1Path = full
+            } else if (lower.includes('pic2')) {
+              entry.pic2Path = full
+            }
           }
         }
       }
     } catch {}
   }
 
+  scan(localPhotosDir)
+  return map
+}
+
+function findLocalPhotosFromMap(photosMap: Map<string, LocalPhotoPair>, data: DamageReportRow): string[] {
+  if (!photosMap || photosMap.size === 0) return []
+
+  const shortSn = extractBladeSn(data.bladeSerialNumber).toLowerCase()
+  const df1 = `df${data.dfDistanceStart}-${data.dfDistanceEnd}`.toLowerCase()
+  const df2 = `df${data.dfDistanceStart}`.toLowerCase()
+
+  const entry = photosMap.get(`${shortSn}_${df1}`) || photosMap.get(`${shortSn}_${df2}`)
+  const result: string[] = []
+
+  if (entry) {
+    if (entry.pic1Path) result.push(entry.pic1Path)
+    if (entry.pic2Path) result.push(entry.pic2Path)
+  }
+
+  return result
+}
+
+export function findLocalPhotosForDamage(localPhotosDir: string, data: DamageReportRow): string[] {
+  if (!localPhotosDir || !fs.existsSync(localPhotosDir)) return []
+
+  const shortSn = extractBladeSn(data.bladeSerialNumber).toLowerCase()
+  const dfStartStr = String(data.dfDistanceStart).trim().toLowerCase()
+  const dfEndStr = String(data.dfDistanceEnd).trim().toLowerCase()
+
+  const foundPic1: string[] = []
+  const foundPic2: string[] = []
+
+  function scan(dir: string) {
+    try {
+      const items = fs.readdirSync(dir, { withFileTypes: true })
+      for (const item of items) {
+        const full = path.join(dir, item.name)
+        if (item.isDirectory()) {
+          scan(full)
+        } else if (item.isFile()) {
+          const lower = item.name.toLowerCase()
+          if (!lower.endsWith('.jpeg') && !lower.endsWith('.jpg') && !lower.endsWith('.png')) continue
+
+          const matchSn = !shortSn || lower.includes(shortSn)
+          const matchDf = lower.includes(`df${dfStartStr}`) || lower.includes(`df${dfEndStr}`)
+
+          if (matchSn && matchDf) {
+            if (lower.includes('pic1')) foundPic1.push(full)
+            else if (lower.includes('pic2')) foundPic2.push(full)
+          }
+        }
+      }
+    } catch {}
+  }
 
   scan(localPhotosDir)
 
-  // Garante que pic1 (polígono) venha antes de pic2 (zoom regional)
-  matches.sort((a, b) => {
-    const aIsPic1 = a.toLowerCase().includes('pic1') ? 0 : 1
-    const bIsPic1 = b.toLowerCase().includes('pic1') ? 0 : 1
-    if (aIsPic1 !== bIsPic1) return aIsPic1 - bIsPic1
-    return a.localeCompare(b)
-  })
+  const result: string[] = []
+  if (foundPic1.length > 0) result.push(foundPic1[0])
+  if (foundPic2.length > 0) result.push(foundPic2[0])
 
-  return matches
+  return result
 }
 
 // ─── Entry point ──────────────────────────────────────────────────────────
@@ -710,6 +761,12 @@ export async function runSnowDamageAutomation(
       return { success: false, processed: 0, failed: 0, errors: [], error: 'Nenhuma linha válida na planilha.' }
     }
 
+    // Mapeia previamente todas as fotos da pasta local Fotos/ do Módulo 23
+    const photosMap = options.localPhotosDir ? buildLocalPhotosMap(options.localPhotosDir) : new Map()
+    if (photosMap.size > 0) {
+      log(`✓ Mapeamento prévio de fotos concluído: ${photosMap.size} conjunto(s) de fotos indexado(s).`)
+    }
+
     // Filtragem opcional por Pás selecionadas pelo usuário
     let filteredRows = allRows
     if (options.selectedBlades && options.selectedBlades.length > 0) {
@@ -740,9 +797,6 @@ export async function runSnowDamageAutomation(
       const row = rows[i]
       const prefix = `[${i + 1}/${rows.length}]`
       try {
-        // Cada defeito volta pro formulário "Add Damage Entry" a partir da tela do
-        // Inspection Report do incidente. AJUSTAR conforme o fluxo real navegado —
-        // ver docs/snow-automation.md pros seletores confirmados/pendentes.
         if (!page.url().startsWith(incidentUrl)) {
           await page.goto(incidentUrl, { waitUntil: 'domcontentloaded' })
         }
@@ -772,17 +826,19 @@ export async function runSnowDamageAutomation(
         }
 
         if (!clickedAdd) {
-          // Fallback final
           await page.getByRole('button', { name: /create damage entry|add damage entry/i }).click({ timeout: 5000 })
         }
 
-        // Aguarda a abertura do formulário (espera o campo "Blade serial number" ficar disponível)
         const activeScope = page.frames().find((f) => f.name() === 'gsft_main' || f.url().includes('.do')) || page
         await activeScope.getByLabel('Blade serial number', { exact: false }).first().waitFor({ state: 'visible', timeout: 12000 }).catch(() => {})
 
+        // Cruza a linha atual com o mapa pré-indexado de fotos
+        const localPhotos = options.localPhotosDir
+          ? findLocalPhotosFromMap(photosMap, row)
+          : []
 
         const filler = new DamageEntryFiller(page, (m) => log(`  ${prefix} ${m}`))
-        await filler.fill(row, options.localPhotosDir, options.autoSubmit ?? false)
+        await filler.fill(row, localPhotos, options.autoSubmit ?? false)
 
         processed++
         log(`✓ ${prefix} OK: ${row.bladeSerialNumber} — ${row.failureType}`)
@@ -791,6 +847,7 @@ export async function runSnowDamageAutomation(
           log(`ℹ Modo conferência manual ativo: o formulário foi preenchido e mantido aberto no navegador para sua revisão.`)
           break
         }
+
 
       } catch (err: any) {
         failed++
