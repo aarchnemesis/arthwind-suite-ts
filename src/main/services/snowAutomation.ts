@@ -555,25 +555,25 @@ async function readDamageRows(excelPath: string): Promise<DamageReportRow[]> {
   return rows
 }
 
-/** Extrai o S/N de 4 dígitos exatos do serial completo (ex.: "A1 811 0410 0115" -> "0410") */
+/** Extrai o S/N de 4 dígitos exatos do serial completo (ex.: "A1 811 0413 0115" -> "0413" ou "B0413_S2..." -> "0413") */
 export function extractBladeSn(bladeSerial: string): string {
   if (!bladeSerial) return ''
   const trimmed = bladeSerial.trim()
 
-  // Estrutura padrão: "A1 811 0410 0115" -> tokens[2] é o "0410" (S/N da Pá)
+  // 1. Estrutura padrão: "A1 811 0410 0115" -> tokens[2] é "0410"
   const tokens = trimmed.split(/[\s\-_]+/)
   if (tokens.length >= 4 && /^\d{4}$/.test(tokens[2])) {
     return tokens[2]
   }
 
-  // Captura o grupo de 4 dígitos que vem imediatamente antes do SET (último grupo de 4 dígitos)
-  const match = trimmed.match(/\b(\d{4})\s+\d{4}\b/)
+  // 2. Nomes de arquivo ou códigos como "B0413_S2..." ou "0413"
+  const match = trimmed.match(/(?:B|^|[\s\-_])(\d{4})(?:[\s\-_]|$)/i)
   if (match) {
     return match[1]
   }
 
-  // Fallback
-  const match4 = trimmed.match(/\b\d{4}\b/)
+  // 3. Fallback genérico para 4 dígitos
+  const match4 = trimmed.match(/\d{4}/)
   if (match4) {
     return match4[0]
   }
@@ -638,7 +638,7 @@ export interface LocalPhotoPair {
 
 /**
  * Mapeia previamente a pasta Fotos/ gerada pelo Módulo 23 no início da automação.
- * Indexa cada defeito pelas chaves (ex.: "0414_df59.2-59.2" ou "0414_df59.2")
+ * Indexa cada defeito pelas chaves (ex.: "0413_df58.5" ou "0413_df58.5-59")
  * com os caminhos absolutos exatos das fotos pic1.jpeg e pic2.jpeg no disco.
  */
 export function buildLocalPhotosMap(localPhotosDir: string): Map<string, LocalPhotoPair> {
@@ -656,6 +656,7 @@ export function buildLocalPhotosMap(localPhotosDir: string): Map<string, LocalPh
           const lower = item.name.toLowerCase()
           if (!lower.endsWith('.jpeg') && !lower.endsWith('.jpg') && !lower.endsWith('.png')) continue
 
+          // Procura o S/N da pá no nome do arquivo ou nas pastas pai
           const shortSn = extractBladeSn(item.name).toLowerCase()
           const dfMatch = lower.match(/df[\d\.\-]+/)
           const dfKey = dfMatch ? dfMatch[0] : ''
@@ -681,7 +682,7 @@ export function buildLocalPhotosMap(localPhotosDir: string): Map<string, LocalPh
   return map
 }
 
-function findLocalPhotosFromMap(photosMap: Map<string, LocalPhotoPair>, data: DamageReportRow): string[] {
+export function findLocalPhotosFromMap(photosMap: Map<string, LocalPhotoPair>, data: DamageReportRow): string[] {
   if (!photosMap || photosMap.size === 0) return []
 
   const shortSn = extractBladeSn(data.bladeSerialNumber).toLowerCase()
@@ -702,12 +703,11 @@ function findLocalPhotosFromMap(photosMap: Map<string, LocalPhotoPair>, data: Da
 export function findLocalPhotosForDamage(localPhotosDir: string, data: DamageReportRow): string[] {
   if (!localPhotosDir || !fs.existsSync(localPhotosDir)) return []
 
-  const shortSn = extractBladeSn(data.bladeSerialNumber).toLowerCase()
-  const dfStartStr = String(data.dfDistanceStart).trim().toLowerCase()
-  const dfEndStr = String(data.dfDistanceEnd).trim().toLowerCase()
+  const shortSn = extractBladeSn(data.bladeSerialNumber).toLowerCase() // ex: "0413"
+  const dfStartStr = String(data.dfDistanceStart).trim().toLowerCase() // ex: "58.5"
 
-  const foundPic1: string[] = []
-  const foundPic2: string[] = []
+  const pic1Files: string[] = []
+  const pic2Files: string[] = []
 
   function scan(dir: string) {
     try {
@@ -720,12 +720,14 @@ export function findLocalPhotosForDamage(localPhotosDir: string, data: DamageRep
           const lower = item.name.toLowerCase()
           if (!lower.endsWith('.jpeg') && !lower.endsWith('.jpg') && !lower.endsWith('.png')) continue
 
-          const matchSn = !shortSn || lower.includes(shortSn)
-          const matchDf = lower.includes(`df${dfStartStr}`) || lower.includes(`df${dfEndStr}`)
+          // Verifica se o caminho absoluto ou o nome do arquivo contém a pá (ex: "0413" ou "b0413")
+          const hasSn = !shortSn || lower.includes(shortSn) || full.toLowerCase().includes(`\\${shortSn}\\`) || full.toLowerCase().includes(`/${shortSn}/`)
+          // Verifica se o nome do arquivo contém a distância do DF (ex: "df58.5")
+          const hasDf = lower.includes(`df${dfStartStr}`)
 
-          if (matchSn && matchDf) {
-            if (lower.includes('pic1')) foundPic1.push(full)
-            else if (lower.includes('pic2')) foundPic2.push(full)
+          if (hasSn && hasDf) {
+            if (lower.includes('pic1')) pic1Files.push(full)
+            else if (lower.includes('pic2')) pic2Files.push(full)
           }
         }
       }
@@ -735,11 +737,13 @@ export function findLocalPhotosForDamage(localPhotosDir: string, data: DamageRep
   scan(localPhotosDir)
 
   const result: string[] = []
-  if (foundPic1.length > 0) result.push(foundPic1[0])
-  if (foundPic2.length > 0) result.push(foundPic2[0])
+  if (pic1Files.length > 0) result.push(pic1Files[0])
+  if (pic2Files.length > 0) result.push(pic2Files[0])
 
   return result
 }
+
+
 
 // ─── Entry point ──────────────────────────────────────────────────────────
 
