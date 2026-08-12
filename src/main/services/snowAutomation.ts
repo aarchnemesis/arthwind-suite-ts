@@ -1203,9 +1203,11 @@ export async function runSnowDamageAutomation(
           continue
         }
 
-        // Clica no botão "Add Damage Entry" ou "Create Damage Entry" e captura a nova aba de formulário (se abrir em popup)
-        const popupPromise = context.waitForEvent('page', { timeout: 4000 }).catch(() => null)
+        // Registra a contagem de páginas abertas antes de clicar no botão
+        const initialPages = context.pages().filter((p) => !p.isClosed())
+        const initialCount = initialPages.length
 
+        // Clica no botão "Add Damage Entry" na página principal
         let clickedAdd = false
         for (let attempt = 0; attempt < 5; attempt++) {
           const scopes = [parentPage, ...parentPage.frames()]
@@ -1243,22 +1245,23 @@ export async function runSnowDamageAutomation(
             .catch(() => {})
         }
 
+        // Aguarda a criação de uma NOVA aba especificamente para esta linha
         let targetFormPage: Page = parentPage
-        const newPopupPage = await popupPromise
-        if (newPopupPage && !newPopupPage.isClosed()) {
-          targetFormPage = newPopupPage
+        for (let waitCount = 0; waitCount < 20; waitCount++) {
+          const currentPages = context.pages().filter((p) => !p.isClosed())
+          if (currentPages.length > initialCount) {
+            targetFormPage = currentPages[currentPages.length - 1]
+            break
+          }
+          await parentPage.waitForTimeout(300)
+        }
+
+        if (targetFormPage !== parentPage) {
           await targetFormPage.waitForLoadState('domcontentloaded').catch(() => {})
           await targetFormPage.bringToFront().catch(() => {})
-          log(`  ✓ Formulário aberto em nova aba (${targetFormPage.url()})`)
-        } else {
-          // Verifica se a última aba aberta é a do formulário
-          const pages = context.pages().filter((p) => !p.isClosed())
-          const lastPage = pages[pages.length - 1]
-          if (lastPage && lastPage !== parentPage) {
-            targetFormPage = lastPage
-            await targetFormPage.bringToFront().catch(() => {})
-          }
+          log(`  ✓ Nova aba de formulário ativada (${targetFormPage.url()})`)
         }
+
 
         const checkFormReady = async (p: Page): Promise<boolean> => {
           const scopes = [p, ...p.frames()]
