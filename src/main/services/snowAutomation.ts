@@ -1248,14 +1248,30 @@ export async function runSnowDamageAutomation(
             .catch(() => {})
         }
 
-        const activeScope = page.frames().find((f) => f.name() === 'gsft_main' || f.url().includes('.do')) || page
-        const isFormReady = await activeScope.getByLabel('Blade serial number', { exact: false }).first().isVisible({ timeout: 8000 }).catch(() => false)
+        const checkFormReady = async (): Promise<boolean> => {
+          const scopes = [page, ...page.frames()]
+          for (const s of scopes) {
+            try {
+              const hasLabel = await s.getByText(/blade serial number|sub component|failure type/i).first().isVisible({ timeout: 500 }).catch(() => false)
+              const hasSelect2 = await s.locator('.select2-container, .select2-choice').first().isVisible({ timeout: 500 }).catch(() => false)
+              if (hasLabel || hasSelect2) return true
+            } catch {}
+          }
+          return false
+        }
+
+        let isFormReady = await checkFormReady()
+        if (!isFormReady) {
+          await page.waitForTimeout(3000)
+          isFormReady = await checkFormReady()
+        }
 
         if (!isFormReady) {
           log(`  ⚠ O formulário de cadastro não abriu após clicar em 'Create Damage Entry'. Recarregando página do relatório...`)
           await page.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
           throw new Error("A tela 'Create Damage Entry' não carregou a tempo.")
         }
+
 
         // Cruza a linha atual com o mapa pré-indexado de fotos
         let localPhotos = options.localPhotosDir
