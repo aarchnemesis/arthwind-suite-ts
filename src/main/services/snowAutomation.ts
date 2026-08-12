@@ -229,10 +229,26 @@ class DamageEntryFiller {
 
   private async fillText(fieldLabel: string, value: string | number): Promise<void> {
     const scope = this.getScope()
-    const field = scope.getByLabel(fieldLabel, { exact: false }).first()
-    await field.waitFor({ state: 'visible', timeout: 10000 })
-    await field.fill(String(value))
+    const locators = [
+      scope.getByLabel(fieldLabel, { exact: false }).first(),
+      scope.locator(`textarea[aria-label*="${fieldLabel}"], input[aria-label*="${fieldLabel}"]`).first(),
+      scope.locator(`div.form-group:has-text("${fieldLabel}") textarea, div.form-group:has-text("${fieldLabel}") input`).first()
+    ]
+
+    for (const field of locators) {
+      try {
+        if (await field.isVisible({ timeout: 3000 }).catch(() => false)) {
+          await field.fill(String(value))
+          return
+        }
+      } catch {}
+    }
+
+    const primary = scope.getByLabel(fieldLabel, { exact: false }).first()
+    await primary.waitFor({ state: 'visible', timeout: 15000 }).catch(() => {})
+    await primary.fill(String(value)).catch(() => {})
   }
+
 
   private buildPhotoBaseName(data: DamageReportRow): string {
     const shortSn = extractBladeSn(data.bladeSerialNumber)
@@ -752,23 +768,33 @@ export function buildLocalPhotosMap(localPhotosDir: string): Map<string, LocalPh
           const isVid = lower.endsWith('.mp4') || lower.endsWith('.mov') || lower.endsWith('.avi') || lower.endsWith('.mkv')
           if (!isImg && !isVid) continue
 
-          // Procura o S/N da pá no nome do arquivo ou nas pastas pai
           const shortSn = extractBladeSn(item.name).toLowerCase()
           const dfMatch = lower.match(/df[\d\.\-_]+/)
           const dfKey = dfMatch ? dfMatch[0] : ''
+          const secMatch = lower.match(/s1|s2/i)
+          const secKey = secMatch ? secMatch[0].toLowerCase() : ''
+          const areaMatch = lower.match(/(?:^|_)(ps|ss)(?:_|\.|$)/i)
+          const areaKey = areaMatch ? areaMatch[1].toLowerCase() : ''
 
           if (shortSn && dfKey) {
-            const key = `${shortSn}_${dfKey}`
-            if (!map.has(key)) {
-              map.set(key, {})
+            const keysToSet: string[] = []
+            if (secKey && areaKey) {
+              keysToSet.push(`${shortSn}_${secKey}_${areaKey}_${dfKey}`)
             }
-            const entry = map.get(key)!
-            if (lower.includes('pic1')) {
-              entry.pic1Path = full
-            } else if (lower.includes('pic2')) {
-              entry.pic2Path = full
-            } else if (isVid || lower.includes('video') || lower.includes('vid')) {
-              entry.videoPath = full
+            keysToSet.push(`${shortSn}_${dfKey}`)
+
+            for (const key of keysToSet) {
+              if (!map.has(key)) {
+                map.set(key, {})
+              }
+              const entry = map.get(key)!
+              if (lower.includes('pic1')) {
+                entry.pic1Path = full
+              } else if (lower.includes('pic2')) {
+                entry.pic2Path = full
+              } else if (isVid || lower.includes('video') || lower.includes('vid')) {
+                entry.videoPath = full
+              }
             }
           }
         }
@@ -802,18 +828,26 @@ export function findLocalPhotosFromMap(photosMap: Map<string, LocalPhotoPair>, d
   if (!photosMap || photosMap.size === 0) return []
 
   const shortSn = extractBladeSn(data.bladeSerialNumber).toLowerCase()
+  const secCode = /section\s*2|s2/i.test(data.bladeSection) ? 's2' : 's1'
+  const areaCode = data.bladeArea ? data.bladeArea.toLowerCase() : 'ss'
   const df1 = `df${data.dfDistanceStart}-${data.dfDistanceEnd}`.toLowerCase()
   const df2 = `df${data.dfDistanceStart}`.toLowerCase()
 
   const result: string[] = []
 
-  // Tenta chave exata primeiro
-  let entry = photosMap.get(`${shortSn}_${df1}`) || photosMap.get(`${shortSn}_${df2}`)
+  // Tenta chave específica com Seção e Área primeiro (ex: "0379_s1_ps_df45_df50")
+  let entry =
+    photosMap.get(`${shortSn}_${secCode}_${areaCode}_${df1}`) ||
+    photosMap.get(`${shortSn}_${secCode}_${areaCode}_${df2}`) ||
+    photosMap.get(`${shortSn}_${secCode}_${areaCode}_df45_df50`) ||
+    photosMap.get(`${shortSn}_${secCode}_${areaCode}_df45-50`) ||
+    photosMap.get(`${shortSn}_${df1}`) ||
+    photosMap.get(`${shortSn}_${df2}`)
 
-  // Se for linha de vídeo ou não encontrou por DF exato, busca qualquer chave da mesma pá contendo vídeo
   if (!entry && (data.dfDistanceStart === 45 && data.dfDistanceEnd === 50)) {
+    // Busca no mapa qualquer vídeo que bata com a mesma pá, seção e área
     for (const [k, val] of photosMap.entries()) {
-      if (k.startsWith(`${shortSn}_`) && val.videoPath) {
+      if (k.startsWith(`${shortSn}_`) && k.includes(`_${secCode}_`) && k.includes(`_${areaCode}_`) && val.videoPath) {
         entry = val
         break
       }
@@ -828,6 +862,7 @@ export function findLocalPhotosFromMap(photosMap: Map<string, LocalPhotoPair>, d
 
   return result
 }
+
 
 export function findLocalPhotosForDamage(localPhotosDir: string, data: DamageReportRow): string[] {
   if (!localPhotosDir || !fs.existsSync(localPhotosDir)) return []
