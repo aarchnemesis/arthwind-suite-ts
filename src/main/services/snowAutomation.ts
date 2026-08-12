@@ -1211,9 +1211,9 @@ export async function runSnowDamageAutomation(
           continue
         }
 
-        // Clica no botão "Add Damage Entry" ou "Create Damage Entry" na targetPage
+        // Clica no botão "Add Damage Entry" com rolagens, retentativas e timeout limite para evitar travamentos
         let clickedAdd = false
-        for (let attempt = 0; attempt < 5; attempt++) {
+        for (let attempt = 0; attempt < 12; attempt++) {
           const scopes = [targetPage, ...targetPage.frames()]
           for (const s of scopes) {
             const locators = [
@@ -1221,16 +1221,21 @@ export async function runSnowDamageAutomation(
               s.locator('button, a', { hasText: /^create damage entry$/i }),
               s.getByRole('button', { name: /add damage entry|create damage entry|nova entrada/i }),
               s.getByRole('link', { name: /add damage entry|create damage entry|nova entrada/i }),
-              s.getByText(/add damage entry|create damage entry/i).first()
+              s.locator('.btn', { hasText: /damage entry/i }),
+              s.locator('button, a', { hasText: /damage entry/i })
             ]
             for (const loc of locators) {
               try {
-                if (await loc.isVisible({ timeout: 800 }).catch(() => false)) {
-                  await loc.click({ force: true })
+                if (await loc.first().isVisible({ timeout: 400 }).catch(() => false)) {
+                  await loc.first().scrollIntoViewIfNeeded().catch(() => {})
+                  await loc.first().click({ force: true, timeout: 3000 })
                   clickedAdd = true
+                  log(`  ✓ Clicado em 'Add Damage Entry'`)
                   break
                 }
-              } catch {}
+              } catch {
+                /* tenta próximo */
+              }
             }
             if (clickedAdd) break
           }
@@ -1239,10 +1244,11 @@ export async function runSnowDamageAutomation(
         }
 
         if (!clickedAdd) {
+          log(`  ⚠ Tentando clique forçado no botão Add Damage Entry...`)
           await targetPage
             .locator('button, a', { hasText: /add damage entry|create damage entry/i })
             .first()
-            .click({ force: true })
+            .click({ force: true, timeout: 3000 })
             .catch(() => {})
         }
 
@@ -1250,6 +1256,7 @@ export async function runSnowDamageAutomation(
         const activePages = context.pages().filter((p) => !p.isClosed())
         const formPage = activePages[activePages.length - 1] || targetPage
         await formPage.bringToFront().catch(() => {})
+
 
         const checkFormReady = async (p: Page): Promise<boolean> => {
           const scopes = [p, ...p.frames()]
