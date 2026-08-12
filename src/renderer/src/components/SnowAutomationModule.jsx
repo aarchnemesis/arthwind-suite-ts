@@ -14,6 +14,7 @@ export default function SnowAutomationModule({ D }) {
   const [incidentUrl, setIncidentUrl] = useState('');
   const [headless, setHeadless] = useState(false);
   const [autoSubmit, setAutoSubmit] = useState(false);
+  const [concurrency, setConcurrency] = useState(5);
   const [startRow, setStartRow] = useState('');
   const [endRow, setEndRow] = useState('');
   const [blades, setBlades] = useState([]);
@@ -25,6 +26,7 @@ export default function SnowAutomationModule({ D }) {
   const [logs, setLogs] = useState([]);
   const [result, setResult] = useState(null);
   const logsEndRef = useRef(null);
+
 
 
   useEffect(() => {
@@ -137,9 +139,11 @@ export default function SnowAutomationModule({ D }) {
       selectedBlades,
       localPhotosDir,
       autoSubmit,
+      concurrency: parseInt(concurrency, 10) || 5,
       ...(startRow ? { startRow: parseInt(startRow, 10) } : {}),
       ...(endRow ? { endRow: parseInt(endRow, 10) } : {}),
     };
+
 
 
     try {
@@ -391,6 +395,31 @@ export default function SnowAutomationModule({ D }) {
           </div>
         </div>
 
+        {/* Abas simultâneas (Paralelismo) */}
+        <div className="form-group">
+          <div className="field-label" style={{ color: D.textMuted }}>Abas simultâneas (Paralelismo)</div>
+          <select
+            value={concurrency}
+            onChange={(e) => setConcurrency(parseInt(e.target.value, 10))}
+            disabled={running}
+            style={{
+              width: '100%',
+              boxSizing: 'border-box',
+              padding: '8px 10px',
+              borderRadius: '8px',
+              border: `1px solid ${D.borderLight}`,
+              background: D.bgCard,
+              color: D.textPrimary,
+              fontSize: '12px'
+            }}
+          >
+            <option value={1}>1 aba (Sequencial)</option>
+            <option value={3}>3 abas simultâneas</option>
+            <option value={5}>5 abas simultâneas (Recomendado)</option>
+            <option value={10}>10 abas simultâneas</option>
+          </select>
+        </div>
+
         {/* Headless & Submissão */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: D.textSecond, cursor: 'pointer' }}>
@@ -402,6 +431,7 @@ export default function SnowAutomationModule({ D }) {
             Submeter formulário automaticamente (desativado = apenas preenche)
           </label>
         </div>
+
 
 
         {/* Botão de Run */}

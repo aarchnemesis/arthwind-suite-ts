@@ -743,8 +743,6 @@ export function findLocalPhotosForDamage(localPhotosDir: string, data: DamageRep
   return result
 }
 
-
-
 // ─── Entry point ──────────────────────────────────────────────────────────
 
 export interface RunAutomationOptions {
@@ -754,7 +752,9 @@ export interface RunAutomationOptions {
   selectedBlades?: string[] // Lista de seriais de pás selecionados para processar
   localPhotosDir?: string // Pasta local com as fotos geradas pelo Módulo 23 (contendo _pic1 e _pic2)
   autoSubmit?: boolean // Se true, clica em Submit no formulário. Padrão: false.
+  concurrency?: number // Quantidade de abas simultâneas em paralelo (padrão: 5)
 }
+
 
 
 export interface RunAutomationResult {
@@ -800,78 +800,88 @@ export async function runSnowDamageAutomation(
     const end = Math.min(filteredRows.length, options.endRow ?? filteredRows.length)
     const rows = filteredRows.slice(start, end)
 
+    const concurrency = Math.max(1, options.concurrency ?? 5)
+    const autoSubmit = options.autoSubmit ?? false
 
-    log(`${rows.length} linha(s) a processar (de ${allRows.length} no total da planilha).`)
+    log(`${rows.length} linha(s) a processar (${concurrency} aba(s) simultânea(s), autoSubmit: ${autoSubmit ? 'SIM' : 'NÃO'}).`)
 
     const context = await getContext(options.headless ?? false)
-    const page = context.pages()[0] || (await context.newPage())
-
     let processed = 0
     let failed = 0
     const errors: string[] = []
 
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i]
-      const prefix = `[${i + 1}/${rows.length}]`
-      try {
-        if (!page.url().startsWith(incidentUrl)) {
+    // Processamento em lotes paralelos de tamanho `concurrency`
+    for (let batchStart = 0; batchStart < rows.length; batchStart += concurrency) {
+      const batch = rows.slice(batchStart, batchStart + concurrency)
+      log(`⚡ Iniciando lote de ${batch.length} aba(s) simultânea(s)...`)
+
+      const batchPromises = batch.map(async (row, batchIdx) => {
+        const itemIdx = batchStart + batchIdx + 1
+        const prefix = `[Aba ${batchIdx + 1}/${batch.length} | Defeito ${itemIdx}/${rows.length}]`
+
+        const page = await context.newPage()
+        try {
           await page.goto(incidentUrl, { waitUntil: 'domcontentloaded' })
-        }
 
-        // Busca o botão "Create Damage Entry" ou "Add Damage Entry" na página ou dentro de um iframe
-        const scopes = [page, ...page.frames()]
-        let clickedAdd = false
+          // Clicar em "Create Damage Entry" na aba correspondente
+          const scopes = [page, ...page.frames()]
+          let clickedAdd = false
 
-        for (const s of scopes) {
-          const locators = [
-            s.getByRole('button', { name: /create damage entry|add damage entry|nova entrada|criar dano|new damage/i }),
-            s.getByRole('link', { name: /create damage entry|add damage entry|nova entrada|criar dano|new damage/i }),
-            s.getByText(/create damage entry|add damage entry|nova entrada|criar dano/i).first()
-          ]
-          for (const loc of locators) {
-            try {
-              if (await loc.isVisible({ timeout: 1500 }).catch(() => false)) {
-                await loc.click()
-                clickedAdd = true
-                break
+          for (const s of scopes) {
+            const locators = [
+              s.getByRole('button', { name: /create damage entry|add damage entry|nova entrada|criar dano|new damage/i }),
+              s.getByRole('link', { name: /create damage entry|add damage entry|nova entrada|criar dano|new damage/i }),
+              s.getByText(/create damage entry|add damage entry|nova entrada|criar dano/i).first()
+            ]
+            for (const loc of locators) {
+              try {
+                if (await loc.isVisible({ timeout: 1500 }).catch(() => false)) {
+                  await loc.click()
+                  clickedAdd = true
+                  break
+                }
+              } catch {
+                /* tenta próximo */
               }
-            } catch {
-              /* tenta próximo */
             }
+            if (clickedAdd) break
           }
-          if (clickedAdd) break
+
+          if (!clickedAdd) {
+            await page.getByRole('button', { name: /create damage entry|add damage entry/i }).click({ timeout: 5000 }).catch(() => {})
+          }
+
+          const activeScope = page.frames().find((f) => f.name() === 'gsft_main' || f.url().includes('.do')) || page
+          await activeScope.getByLabel('Blade serial number', { exact: false }).first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {})
+
+          // Cruza a linha atual com o mapa pré-indexado de fotos
+          const localPhotos = options.localPhotosDir
+            ? findLocalPhotosFromMap(photosMap, row)
+            : []
+
+          const filler = new DamageEntryFiller(page, (m) => log(`  ${prefix} ${m}`))
+          await filler.fill(row, localPhotos, autoSubmit)
+
+          processed++
+          log(`✓ ${prefix} OK: ${row.bladeSerialNumber} — ${row.failureType}`)
+
+          if (autoSubmit) {
+            // Fecha a aba processada se submetida automaticamente
+            await page.close().catch(() => {})
+          }
+        } catch (err: any) {
+          failed++
+          const msg = `✗ ${prefix} FALHOU: ${row.bladeSerialNumber} — ${row.failureType}: ${err.message}`
+          errors.push(msg)
+          log(msg)
         }
+      })
 
-        if (!clickedAdd) {
-          await page.getByRole('button', { name: /create damage entry|add damage entry/i }).click({ timeout: 5000 })
-        }
+      await Promise.all(batchPromises)
 
-        const activeScope = page.frames().find((f) => f.name() === 'gsft_main' || f.url().includes('.do')) || page
-        await activeScope.getByLabel('Blade serial number', { exact: false }).first().waitFor({ state: 'visible', timeout: 12000 }).catch(() => {})
-
-        // Cruza a linha atual com o mapa pré-indexado de fotos
-        const localPhotos = options.localPhotosDir
-          ? findLocalPhotosFromMap(photosMap, row)
-          : []
-
-        const filler = new DamageEntryFiller(page, (m) => log(`  ${prefix} ${m}`))
-        await filler.fill(row, localPhotos, options.autoSubmit ?? false)
-
-        processed++
-        log(`✓ ${prefix} OK: ${row.bladeSerialNumber} — ${row.failureType}`)
-
-        if (!(options.autoSubmit ?? false)) {
-          log(`ℹ Modo conferência manual ativo: o formulário foi preenchido e mantido aberto no navegador para sua revisão.`)
-          break
-        }
-
-
-      } catch (err: any) {
-        failed++
-        const msg = `✗ ${prefix} FALHOU: ${row.bladeSerialNumber} — ${row.failureType}: ${err.message}`
-        errors.push(msg)
-        log(msg)
-        // Não derruba o lote inteiro — segue pra próxima linha.
+      if (!autoSubmit) {
+        log(`ℹ Lote de ${batch.length} formulário(s) preenchido(s) com sucesso e mantido(s) aberto(s) em ${batch.length} aba(s) para sua revisão!`)
+        break
       }
     }
 
@@ -881,3 +891,4 @@ export async function runSnowDamageAutomation(
     return { success: false, processed: 0, failed: 0, errors: [], error: err.message }
   }
 }
+
