@@ -844,25 +844,20 @@ export function findLocalPhotosFromMap(photosMap: Map<string, LocalPhotoPair>, d
     photosMap.get(`${shortSn}_${df1}`) ||
     photosMap.get(`${shortSn}_${df2}`)
 
-  if (!entry && (data.dfDistanceStart === 45 && data.dfDistanceEnd === 50)) {
-    // Busca no mapa qualquer vídeo que bata com a mesma pá, seção e área
-    for (const [k, val] of photosMap.entries()) {
-      if (k.startsWith(`${shortSn}_`) && k.includes(`_${secCode}_`) && k.includes(`_${areaCode}_`) && val.videoPath) {
-        entry = val
-        break
-      }
-    }
-  }
+  const isVideoRow = data.dfDistanceStart === 45 && data.dfDistanceEnd === 50
+
 
   if (entry) {
-    if (entry.pic1Path) result.push(entry.pic1Path)
-    if (entry.pic2Path) result.push(entry.pic2Path)
-    if (entry.videoPath) result.push(entry.videoPath)
+    if (isVideoRow) {
+      if (entry.videoPath) result.push(entry.videoPath)
+    } else {
+      if (entry.pic1Path) result.push(entry.pic1Path)
+      if (entry.pic2Path) result.push(entry.pic2Path)
+    }
   }
 
   return result
 }
-
 
 export function findLocalPhotosForDamage(localPhotosDir: string, data: DamageReportRow): string[] {
   if (!localPhotosDir || !fs.existsSync(localPhotosDir)) return []
@@ -924,7 +919,6 @@ export function findLocalPhotosForDamage(localPhotosDir: string, data: DamageRep
                 }
               }
             }
-
           }
         }
       }
@@ -951,13 +945,19 @@ export function findLocalPhotosForDamage(localPhotosDir: string, data: DamageRep
 
   scanWithParent(localPhotosDir)
 
+  const isVideoRow = data.dfDistanceStart === 45 && data.dfDistanceEnd === 50
   const result: string[] = []
-  if (pic1Files.length > 0) result.push(pic1Files[0])
-  if (pic2Files.length > 0) result.push(pic2Files[0])
-  if (videoFiles.length > 0) result.push(videoFiles[0])
+
+  if (isVideoRow) {
+    if (videoFiles.length > 0) result.push(videoFiles[0])
+  } else {
+    if (pic1Files.length > 0) result.push(pic1Files[0])
+    if (pic2Files.length > 0) result.push(pic2Files[0])
+  }
 
   return result
 }
+
 
 
 // ─── Entry point ──────────────────────────────────────────────────────────
