@@ -927,26 +927,35 @@ export async function runSnowDamageAutomation(
 
     log(`${rows.length} linha(s) a processar (Modo: ${autoSubmit ? 'Submissão Automática' : 'Conferência Manual'}).`)
 
-    const context = await getContext(options.headless ?? false)
     let processed = 0
     let failed = 0
     const errors: string[] = []
 
     for (let i = 0; i < rows.length; i++) {
-
       const row = rows[i]
       const prefix = `[${i + 1}/${rows.length}]`
       try {
+        let context: BrowserContext
+        try {
+          context = await getContext(options.headless ?? false)
+        } catch {
+          await closeServiceNowSession()
+          context = await getContext(options.headless ?? false)
+        }
+
         let page: Page
-        if (i === 0) {
+        if (autoSubmit) {
+          // No modo autoSubmit, reutiliza a página existente para evitar que o fechamento da última aba encerre o perfil do Chrome
           page = context.pages().find((p) => !p.isClosed()) || (await context.newPage())
         } else {
-          page = await context.newPage()
+          page = (i === 0)
+            ? (context.pages().find((p) => !p.isClosed()) || (await context.newPage()))
+            : (await context.newPage())
         }
 
         await page.bringToFront().catch(() => {})
         if (!page.url().startsWith(incidentUrl)) {
-          await page.goto(incidentUrl, { waitUntil: 'domcontentloaded' })
+          await page.goto(incidentUrl, { waitUntil: 'domcontentloaded' }).catch(() => {})
         }
 
         // Busca o botão "Create Damage Entry" na página principal ou em iFrames com até 10 tentativas
@@ -968,7 +977,6 @@ export async function runSnowDamageAutomation(
                   log(`  ✓ Clicado em 'Create Damage Entry' (tentativa ${attempt + 1})`)
                   break
                 }
-
               } catch {
                 /* tenta próximo */
               }
@@ -988,8 +996,6 @@ export async function runSnowDamageAutomation(
             .catch(() => {})
         }
 
-
-
         const activeScope = page.frames().find((f) => f.name() === 'gsft_main' || f.url().includes('.do')) || page
         await activeScope.getByLabel('Blade serial number', { exact: false }).first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {})
 
@@ -1005,7 +1011,8 @@ export async function runSnowDamageAutomation(
         log(`✓ ${prefix} OK: ${row.bladeSerialNumber} — ${row.failureType}`)
 
         if (autoSubmit) {
-          await page.close().catch(() => {})
+          // Em autoSubmit, redireciona a própria página de volta ao relatório principal em vez de fechar a aba
+          await page.goto(incidentUrl, { waitUntil: 'domcontentloaded' }).catch(() => {})
         } else {
           log(`  ℹ Formulário [${i + 1}/${rows.length}] mantido aberto na tela para revisão. Avançando para a próxima linha...`)
         }
@@ -1016,6 +1023,7 @@ export async function runSnowDamageAutomation(
         log(msg)
       }
     }
+
 
     if (!autoSubmit) {
       log(`ℹ Concluído! ${processed} formulário(s) preenchido(s) com sucesso e mantido(s) aberto(s) em abas/janelas para sua revisão final.`)
