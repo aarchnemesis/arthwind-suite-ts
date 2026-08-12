@@ -55,8 +55,10 @@ import { processSnowExcel, processSnowExcelBatch } from './services/snowProcesso
 import {
   openServiceNowForLogin,
   closeServiceNowSession,
-  runSnowDamageAutomation
+  runSnowDamageAutomation,
+  getSpreadsheetBlades
 } from './services/snowAutomation'
+
 
 // Configuration Helpers
 function getConfigPath(): string {
@@ -487,19 +489,24 @@ app.whenReady().then(() => {
     return closeServiceNowSession()
   })
 
+  ipcMain.handle('snow_automation_get_blades', async (_event, excelPath: string) => {
+    return getSpreadsheetBlades(excelPath)
+  })
+
   ipcMain.handle(
     'snow_automation_run',
     async (
       event,
       excelPath: string,
       incidentUrl: string,
-      options: { headless?: boolean; startRow?: number; endRow?: number }
+      options: { headless?: boolean; startRow?: number; endRow?: number; selectedBlades?: string[] }
     ) => {
       return runSnowDamageAutomation(excelPath, incidentUrl, options, (msg: string) => {
         event.sender.send('snow_automation_log', { msg })
       })
     }
   )
+
 
   createWindow()
 

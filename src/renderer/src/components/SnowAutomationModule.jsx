@@ -14,6 +14,9 @@ export default function SnowAutomationModule({ D }) {
   const [headless, setHeadless] = useState(false);
   const [startRow, setStartRow] = useState('');
   const [endRow, setEndRow] = useState('');
+  const [blades, setBlades] = useState([]);
+  const [selectedBlades, setSelectedBlades] = useState([]);
+  const [loadingBlades, setLoadingBlades] = useState(false);
   const [loggingIn, setLoggingIn] = useState(false);
   const [running, setRunning] = useState(false);
   const [ran, setRan] = useState(false);
@@ -39,9 +42,46 @@ export default function SnowAutomationModule({ D }) {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
 
+  const loadBlades = async (path) => {
+    if (!path) return;
+    setLoadingBlades(true);
+    try {
+      const res = await window.pywebview.api.snow_automation_get_blades(path);
+      if (res.success && Array.isArray(res.blades)) {
+        setBlades(res.blades);
+        setSelectedBlades(res.blades.map((b) => b.bladeSerialNumber));
+      } else {
+        setBlades([]);
+        setSelectedBlades([]);
+      }
+    } catch {
+      setBlades([]);
+      setSelectedBlades([]);
+    } finally {
+      setLoadingBlades(false);
+    }
+  };
+
   const pickExcel = async () => {
     const picked = await window.pywebview.api.pick_file('xlsx');
-    if (picked) setExcelPath(picked);
+    if (picked) {
+      setExcelPath(picked);
+      loadBlades(picked);
+    }
+  };
+
+  const toggleBlade = (sn) => {
+    setSelectedBlades((prev) =>
+      prev.includes(sn) ? prev.filter((item) => item !== sn) : [...prev, sn]
+    );
+  };
+
+  const selectAllBlades = () => {
+    setSelectedBlades(blades.map((b) => b.bladeSerialNumber));
+  };
+
+  const deselectAllBlades = () => {
+    setSelectedBlades([]);
   };
 
   const handleLogin = async () => {
@@ -80,6 +120,7 @@ export default function SnowAutomationModule({ D }) {
 
     const options = {
       headless,
+      selectedBlades,
       ...(startRow ? { startRow: parseInt(startRow, 10) } : {}),
       ...(endRow ? { endRow: parseInt(endRow, 10) } : {}),
     };
@@ -116,7 +157,7 @@ export default function SnowAutomationModule({ D }) {
     <div style={{ display: 'flex', gap: '18px', height: '100%', minHeight: 0 }}>
       {/* Painel Esquerdo — Configurações */}
       <div style={{
-        flex: '0 0 340px',
+        flex: '0 0 360px',
         display: 'flex',
         flexDirection: 'column',
         gap: '14px',
@@ -132,9 +173,7 @@ export default function SnowAutomationModule({ D }) {
           color: D.textSecond,
           lineHeight: '1.5'
         }}>
-          Os campos do formulário do SNOW são um widget de busca (não é dropdown nativo) —
-          selectors ajustados por texto visível (label/opção). Se algum campo não bater,
-          veja <code>docs/snow-automation.md</code>.
+          Controle individual de pás e faixas de linhas ativado. Selecione apenas as pás que deseja automatizar para evitar duplicidades no ServiceNow.
         </div>
 
         {/* Planilha */}
@@ -153,6 +192,82 @@ export default function SnowAutomationModule({ D }) {
             </div>
           </div>
         </div>
+
+        {/* Pás encontradas */}
+        {excelPath && (
+          <div style={{
+            background: D.bgCard,
+            border: `1px solid ${D.borderLight}`,
+            borderRadius: '8px',
+            padding: '10px',
+            fontSize: '12px'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <span style={{ fontWeight: 600, color: D.textPrimary }}>Pás Encontradas na Planilha:</span>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button
+                  type="button"
+                  onClick={selectAllBlades}
+                  disabled={running}
+                  style={{ background: 'none', border: 0, color: accent, cursor: 'pointer', fontSize: '10px', padding: 0 }}
+                >
+                  Todas
+                </button>
+                <span style={{ color: D.borderLight }}>|</span>
+                <button
+                  type="button"
+                  onClick={deselectAllBlades}
+                  disabled={running}
+                  style={{ background: 'none', border: 0, color: D.textMuted, cursor: 'pointer', fontSize: '10px', padding: 0 }}
+                >
+                  Nenhuma
+                </button>
+              </div>
+            </div>
+
+            {loadingBlades ? (
+              <div style={{ fontSize: '11px', color: D.textMuted }}>Carregando pás...</div>
+            ) : blades.length === 0 ? (
+              <div style={{ fontSize: '11px', color: D.textMuted }}>Nenhuma pá válida encontrada.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '140px', overflowY: 'auto' }}>
+                {blades.map((b) => {
+                  const isChecked = selectedBlades.includes(b.bladeSerialNumber);
+                  return (
+                    <label
+                      key={b.bladeSerialNumber}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        background: isChecked ? `${accent}10` : 'transparent',
+                        padding: '6px 8px',
+                        borderRadius: '6px',
+                        border: `1px solid ${isChecked ? accent + '40' : D.borderLight}`,
+                        cursor: running ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => toggleBlade(b.bladeSerialNumber)}
+                          disabled={running}
+                        />
+                        <span style={{ fontWeight: 600, color: D.textPrimary, fontSize: '11px' }}>
+                          Pá {b.shortSn}
+                        </span>
+                      </div>
+                      <span style={{ color: D.textMuted, fontSize: '10px' }}>
+                        {b.count} dano(s) (L{b.startRow}-{b.endRow})
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Incidente */}
         <div className="form-group">
@@ -217,7 +332,7 @@ export default function SnowAutomationModule({ D }) {
 
         {/* Faixa de linhas (opcional, pra retomar depois de uma falha) */}
         <div className="form-group">
-          <div className="field-label" style={{ color: D.textMuted }}>Faixa de linhas (opcional)</div>
+          <div className="field-label" style={{ color: D.textMuted }}>Faixa de linhas filtradas (opcional)</div>
           <div style={{ display: 'flex', gap: '8px' }}>
             <input
               type="number" min="1" placeholder="Início"
@@ -233,7 +348,7 @@ export default function SnowAutomationModule({ D }) {
             />
           </div>
           <div style={{ fontSize: '10px', color: D.textMuted, marginTop: '4px' }}>
-            Vazio = processa a planilha inteira. Útil pra retomar de onde uma linha falhou.
+            Vazio = processa todas as linhas das pás selecionadas acima.
           </div>
         </div>
 
@@ -246,23 +361,24 @@ export default function SnowAutomationModule({ D }) {
         {/* Botão de Run */}
         <button
           onClick={handleRun}
-          disabled={running || !excelPath || !incidentUrl.trim()}
+          disabled={running || !excelPath || !incidentUrl.trim() || selectedBlades.length === 0}
           style={{
-            background: running ? D.bgHover : accent,
+            background: (running || selectedBlades.length === 0) ? D.bgHover : accent,
             color: '#fff',
             border: 0,
             borderRadius: '8px',
             padding: '10px',
             fontSize: '13px',
             fontWeight: 600,
-            cursor: (running || !excelPath || !incidentUrl.trim()) ? 'not-allowed' : 'pointer',
-            opacity: (running || !excelPath || !incidentUrl.trim()) ? 0.6 : 1,
+            cursor: (running || !excelPath || !incidentUrl.trim() || selectedBlades.length === 0) ? 'not-allowed' : 'pointer',
+            opacity: (running || !excelPath || !incidentUrl.trim() || selectedBlades.length === 0) ? 0.6 : 1,
             marginTop: 'auto'
           }}
         >
-          {running ? 'Rodando...' : '▶ Rodar Automação'}
+          {running ? 'Rodando...' : `▶ Rodar Automação (${selectedBlades.length} pá(s))`}
         </button>
       </div>
+
 
       {/* Painel Direito — Logs e Progresso */}
       <div style={{

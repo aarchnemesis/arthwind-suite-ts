@@ -316,12 +316,62 @@ async function readDamageRows(excelPath: string): Promise<DamageReportRow[]> {
   return rows
 }
 
+// ─── Leitura e Inspeção de Pás da Planilha ─────────────────────────────────
+
+export interface BladeSummary {
+  bladeSerialNumber: string
+  shortSn: string
+  count: number
+  startRow: number // 1-based index na planilha Excel
+  endRow: number // 1-based index na planilha Excel
+}
+
+export async function getSpreadsheetBlades(
+  excelPath: string
+): Promise<{ success: boolean; blades: BladeSummary[]; error?: string }> {
+  try {
+    const wb = new ExcelJS.Workbook()
+    await wb.xlsx.readFile(excelPath)
+    const ws = wb.worksheets[0]
+    const map = new Map<string, BladeSummary>()
+
+    for (let r = 2; r <= ws.rowCount; r++) {
+      const row = ws.getRow(r)
+      const bladeSerial = String(row.getCell(1).value ?? '').trim()
+      if (!bladeSerial || bladeSerial.toLowerCase() === 'blank image') continue
+
+      // Extrai SN curto (ex.: "A1 811 0410 0115" -> "410")
+      const snMatch = bladeSerial.match(/\b\d{3,4}\b/)
+      const shortSn = snMatch ? snMatch[0] : bladeSerial
+
+      if (!map.has(bladeSerial)) {
+        map.set(bladeSerial, {
+          bladeSerialNumber: bladeSerial,
+          shortSn,
+          count: 1,
+          startRow: r,
+          endRow: r
+        })
+      } else {
+        const item = map.get(bladeSerial)!
+        item.count += 1
+        item.endRow = r
+      }
+    }
+
+    return { success: true, blades: Array.from(map.values()) }
+  } catch (err: any) {
+    return { success: false, blades: [], error: err.message }
+  }
+}
+
 // ─── Entry point ──────────────────────────────────────────────────────────
 
 export interface RunAutomationOptions {
   headless?: boolean
   startRow?: number // 1-based, inclusive
   endRow?: number // 1-based, inclusive
+  selectedBlades?: string[] // Lista de seriais de pás selecionados para processar
 }
 
 export interface RunAutomationResult {
@@ -345,9 +395,22 @@ export async function runSnowDamageAutomation(
       return { success: false, processed: 0, failed: 0, errors: [], error: 'Nenhuma linha válida na planilha.' }
     }
 
+    // Filtragem opcional por Pás selecionadas pelo usuário
+    let filteredRows = allRows
+    if (options.selectedBlades && options.selectedBlades.length > 0) {
+      const selectedSet = new Set(options.selectedBlades.map((b) => b.trim()))
+      filteredRows = allRows.filter((r) => selectedSet.has(r.bladeSerialNumber.trim()))
+      log(`Filtro por Pás ativo: ${options.selectedBlades.length} pá(s) selecionada(s) -> ${filteredRows.length} linha(s).`)
+    }
+
+    if (filteredRows.length === 0) {
+      return { success: false, processed: 0, failed: 0, errors: [], error: 'Nenhuma linha corresponde às pás selecionadas.' }
+    }
+
     const start = Math.max(0, (options.startRow ?? 1) - 1)
-    const end = Math.min(allRows.length, options.endRow ?? allRows.length)
-    const rows = allRows.slice(start, end)
+    const end = Math.min(filteredRows.length, options.endRow ?? filteredRows.length)
+    const rows = filteredRows.slice(start, end)
+
 
     log(`${rows.length} linha(s) a processar (de ${allRows.length} no total da planilha).`)
 

@@ -58,8 +58,10 @@ const ipcMethods = [
   'snow_process_excel_batch',
   'snow_automation_login',
   'snow_automation_close',
+  'snow_automation_get_blades',
   'snow_automation_run'
 ]
+
 
 const api: Record<string, (...args: any[]) => Promise<any>> = {}
 
