@@ -14,9 +14,10 @@ export default function SnowAutomationModule({ D }) {
   const [incidentUrl, setIncidentUrl] = useState('');
   const [headless, setHeadless] = useState(false);
   const [autoSubmit, setAutoSubmit] = useState(false);
-  const [includeBlankImages, setIncludeBlankImages] = useState(false);
   const [skipSubmitted, setSkipSubmitted] = useState(true);
+  const [processOnlyVideos, setProcessOnlyVideos] = useState(false);
   const [startRow, setStartRow] = useState('');
+
 
   const [endRow, setEndRow] = useState('');
 
@@ -144,9 +145,11 @@ export default function SnowAutomationModule({ D }) {
       autoSubmit,
       includeBlankImages,
       skipSubmitted,
+      processOnlyVideos,
       ...(startRow ? { startRow: parseInt(startRow, 10) } : {}),
       ...(endRow ? { endRow: parseInt(endRow, 10) } : {}),
     };
+
 
 
 
@@ -419,7 +422,12 @@ export default function SnowAutomationModule({ D }) {
             <input type="checkbox" checked={skipSubmitted} onChange={(e) => setSkipSubmitted(e.target.checked)} disabled={running} />
             Ignorar defeitos já submetidos no histórico (evita duplicatas ao reiniciar)
           </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: D.textSecond, cursor: 'pointer' }}>
+            <input type="checkbox" checked={processOnlyVideos} onChange={(e) => setProcessOnlyVideos(e.target.checked)} disabled={running} />
+            Processar APENAS Vídeos (DF 45-50) — ignora os defeitos normais
+          </label>
         </div>
+
 
 
 

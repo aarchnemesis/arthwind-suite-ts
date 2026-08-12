@@ -279,7 +279,7 @@ class DamageEntryFiller {
           tempPaths.push(dstPath)
         }
         this.log(`  Enviando ${tempPaths.length} foto(s) com nomes estritos do Módulo 23 (${tempPaths.map(p => path.basename(p)).join(', ')})...`)
-      } else if (data.photoUrls && data.photoUrls.length > 0) {
+      } else if (data.photoUrls && data.photoUrls.length > 0 && data.photoUrls[0].startsWith('http')) {
         // Fallback da nuvem: gera pic1 e pic2 com o nome estrito oficial do Módulo 23 (SEM prefixo 01_ ou 02_)
         const baseName = this.buildPhotoBaseName(data)
         const buffer = await fetchBuffer(data.photoUrls[0])
@@ -293,7 +293,10 @@ class DamageEntryFiller {
         fs.writeFileSync(dst2, buffer)
         tempPaths.push(dst1, dst2)
         this.log(`  Enviando 2 foto(s) com nomes estritos (${p1Name}, ${p2Name})...`)
+      } else if (data.photoUrls && data.photoUrls.length > 0) {
+        this.log(`  ℹ Arquivo de mídia (${data.photoUrls[0]}) não encontrado na pasta local. Ignorando anexo.`)
       }
+
 
 
       if (tempPaths.length > 0) {
@@ -878,6 +881,43 @@ export interface RunAutomationOptions {
   autoSubmit?: boolean // Se true, clica em Submit no formulário. Padrão: false.
   includeBlankImages?: boolean // Se true, inclui as 5 linhas Blank Image (para turbinas/inspeções com < 5 defeitos)
   skipSubmitted?: boolean // Se true, pula linhas já submetidas no histórico
+  processOnlyVideos?: boolean // Se true, filtra e processa APENAS os 4 vídeos de cada pá (DF 45-50)
+}
+
+export async function checkRowExistsInLiveTable(page: Page, row: DamageReportRow): Promise<boolean> {
+  try {
+    const scopes = [page, ...page.frames()]
+    const shortSn = extractBladeSn(row.bladeSerialNumber)
+
+    for (const s of scopes) {
+      const rowsLocator = s.locator('tr.list_row, tr[sys_id], .list2_body tr, table.list_table tr')
+      const count = await rowsLocator.count()
+      if (count === 0) continue
+
+      for (let i = 0; i < count; i++) {
+        const text = await rowsLocator.nth(i).textContent().catch(() => '')
+        if (!text) continue
+
+        const hasSn = !shortSn || text.includes(shortSn)
+        const hasSubComp = text.includes(row.subComponent) || (row.subComponent.includes('Shell') && text.includes('Shell'))
+
+        let hasMatch = false
+        if (row.dfDistanceStart === 45 && row.dfDistanceEnd === 50) {
+          const hasSec = text.includes(row.bladeSection) || (row.bladeSection === 'Section 1' && text.includes('Section 1'))
+          const hasArea = text.includes(row.bladeArea)
+          hasMatch = hasSn && hasSubComp && (text.includes('45') || text.includes('50')) && hasSec && hasArea
+        } else {
+          const hasDf = text.includes(String(row.dfDistanceStart))
+          hasMatch = hasSn && hasSubComp && hasDf
+        }
+
+        if (hasMatch) {
+          return true
+        }
+      }
+    }
+  } catch {}
+  return false
 }
 
 function getSubmittedStorePath(): string {
@@ -956,8 +996,14 @@ export async function runSnowDamageAutomation(
       log(`Filtro por Pás ativo: ${options.selectedBlades.length} pá(s) selecionada(s) -> ${filteredRows.length} linha(s).`)
     }
 
+    // Filtragem opcional: Apenas Vídeos (DF 45-50)
+    if (options.processOnlyVideos) {
+      filteredRows = filteredRows.filter((r) => r.dfDistanceStart === 45 && r.dfDistanceEnd === 50)
+      log(`Filtro 'Apenas Vídeos' ativo: ${filteredRows.length} entrada(s) de vídeo selecionada(s).`)
+    }
+
     if (filteredRows.length === 0) {
-      return { success: false, processed: 0, failed: 0, errors: [], error: 'Nenhuma linha corresponde às pás selecionadas.' }
+      return { success: false, processed: 0, failed: 0, errors: [], error: 'Nenhuma linha corresponde ao filtro selecionado.' }
     }
 
     const start = Math.max(0, (options.startRow ?? 1) - 1)
@@ -1012,6 +1058,15 @@ export async function runSnowDamageAutomation(
         if (!page.url().includes(incidentUrl.split('?')[0])) {
           await page.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
         }
+
+        // Checagem ao vivo na tabela Damage Report Entries do ServiceNow
+        const existsInSnow = await checkRowExistsInLiveTable(page, row)
+        if (existsInSnow) {
+          log(`  ℹ [SNOW Live Check] Entrada para ${row.bladeSerialNumber} (${row.subComponent} DF ${row.dfDistanceStart}-${row.dfDistanceEnd}) já existe na tabela do ServiceNow. Pulando...`)
+          markRowSubmitted(buildRowKey(incidentUrl, row))
+          continue
+        }
+
 
         // Busca o botão "Create Damage Entry" na página principal ou em iFrames com até 10 tentativas
         let clickedAdd = false
