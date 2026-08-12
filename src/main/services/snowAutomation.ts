@@ -238,9 +238,26 @@ class DamageEntryFiller {
 
       if (tempPaths.length > 0) {
         const scope = this.getScope()
-        const fileInput = scope.locator('input[type="file"]').first()
+
+        // No ServiceNow, o botão "Add attachments" (📎) ativa e exibe a zona de upload
+        const attachmentBtn = scope
+          .locator('.attachment-button, [title*="attachment"]')
+          .or(scope.getByText(/add attachments/i))
+          .or(scope.locator('a, button', { hasText: /attachment/i }))
+          .first()
+
+        if (await attachmentBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
+          await attachmentBtn.click({ force: true }).catch(() => {})
+          await this.page.waitForTimeout(300)
+        }
+
+        const fileInput = scope.locator('input[type="file"]').last().or(scope.locator('input[type="file"]').first())
         await fileInput.setInputFiles(tempPaths)
+        this.log(`  ✓ ${tempPaths.length} foto(s) anexada(s) com sucesso!`)
+        await this.page.waitForTimeout(1000)
       }
+    } catch (err: any) {
+      this.log(`  ⚠ Erro no upload de fotos: ${err.message || err}`)
     } finally {
       for (const p of tempPaths) {
         try {
@@ -286,12 +303,21 @@ class DamageEntryFiller {
       }
 
       // 2. Clicar no botão "Add" da seção Optional Fields para abrir a modal "Add Row"
-      const addTableBtn = scope
-        .locator('div, section, fieldset', { hasText: /optional fields/i })
-        .getByRole('button', { name: /^add$/i })
-        .or(scope.getByRole('button', { name: /^add$/i }).first())
+      const addBtns = scope.locator('button, a.btn, input[type="button"]').filter({ hasText: /^add$/i })
+      let clickedAddTable = false
+      for (let i = 0; i < await addBtns.count(); i++) {
+        const btn = addBtns.nth(i)
+        if (await btn.isVisible().catch(() => false)) {
+          await btn.click({ force: true })
+          clickedAddTable = true
+          break
+        }
+      }
 
-      await addTableBtn.click({ force: true })
+      if (!clickedAddTable) {
+        await scope.getByText(/^add$/i).first().click({ force: true }).catch(() => {})
+      }
+
       this.log(`    ✓ Clicado no botão Add para abrir a modal 'Add Row'`)
       await this.page.waitForTimeout(600)
 
@@ -360,7 +386,6 @@ class DamageEntryFiller {
     }
   }
 
-
   async fill(data: DamageReportRow, localPhotosDir?: string, autoSubmit: boolean = false): Promise<void> {
     this.log(
       `Preenchendo: ${data.bladeSerialNumber} | ${data.subComponent} | ${data.failureType} | DF ${data.dfDistanceStart}-${data.dfDistanceEnd}`
@@ -390,7 +415,7 @@ class DamageEntryFiller {
     await this.fillText('Amount of Findings', data.amountOfFindings ?? 1)
 
     // Preenche a caixa de Optional fields (opções: SN_241) e clica no botão Add
-    await this.addOptionalFields('SN_241')
+    await this.addOptionalFields('241')
 
     // Busca fotos locais geradas pelo Módulo 23 (_pic1.jpeg com polígono e _pic2.jpeg regional)
     const localPhotos = localPhotosDir ? findLocalPhotosForDamage(localPhotosDir, data) : []
@@ -429,9 +454,10 @@ class DamageEntryFiller {
       await this.page.waitForLoadState('networkidle').catch(() => {})
       await this.page.waitForTimeout(1000)
     } else {
-      this.log(`  ✓ Formulário e fotos preenchidos! (Modo conferência ativo: não submetido automaticamente).`)
+      this.log(`  ✓ Formulário e fotos preenchidos! (Modo conferência ativo: mantendo formulário aberto).`)
     }
   }
+
 
 
 }
@@ -715,11 +741,14 @@ export async function runSnowDamageAutomation(
         const filler = new DamageEntryFiller(page, (m) => log(`  ${prefix} ${m}`))
         await filler.fill(row, options.localPhotosDir, options.autoSubmit ?? false)
 
-
-
-
         processed++
         log(`✓ ${prefix} OK: ${row.bladeSerialNumber} — ${row.failureType}`)
+
+        if (!(options.autoSubmit ?? false)) {
+          log(`ℹ Modo conferência manual ativo: o formulário foi preenchido e mantido aberto no navegador para sua revisão.`)
+          break
+        }
+
       } catch (err: any) {
         failed++
         const msg = `✗ ${prefix} FALHOU: ${row.bladeSerialNumber} — ${row.failureType}: ${err.message}`
