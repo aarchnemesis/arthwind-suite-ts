@@ -814,20 +814,43 @@ export async function runSnowDamageAutomation(
     let failed = 0
     const errors: string[] = []
 
-    // Processamento em lotes paralelos de tamanho `concurrency`
+    // Processamento em lotes de janelas simultâneas (tamanho `concurrency`)
     for (let batchStart = 0; batchStart < rows.length; batchStart += concurrency) {
       const batch = rows.slice(batchStart, batchStart + concurrency)
-      log(`⚡ Iniciando lote de ${batch.length} aba(s) simultânea(s)...`)
+      log(`⚡ Iniciando lote de ${batch.length} janela(s) simultânea(s)...`)
 
       const batchPromises = batch.map(async (row, batchIdx) => {
         const itemIdx = batchStart + batchIdx + 1
-        const prefix = `[Aba ${batchIdx + 1}/${batch.length} | Defeito ${itemIdx}/${rows.length}]`
+        const prefix = `[Janela ${batchIdx + 1}/${batch.length} | Defeito ${itemIdx}/${rows.length}]`
 
-        const page = await context.newPage()
+        // Posicionamento em grade para abrir janelas separadas no desktop
+        const left = (batchIdx % 3) * 420
+        const top = Math.floor(batchIdx / 3) * 320
+        const windowFeatures = `width=1180,height=820,left=${left},top=${top}`
+
+        let page: Page
         try {
-          await page.goto(incidentUrl, { waitUntil: 'domcontentloaded' })
+          const mainPage = context.pages().find((p) => !p.isClosed()) || (await context.newPage())
+          if (batchIdx === 0 && context.pages().length === 1 && mainPage.url() === 'about:blank') {
+            page = mainPage
+            await page.goto(incidentUrl, { waitUntil: 'domcontentloaded' })
+          } else {
+            const [popup] = await Promise.all([
+              mainPage.waitForEvent('popup', { timeout: 12000 }),
+              mainPage.evaluate(
+                ({ url, features }) => window.open(url, '_blank', features),
+                { url: incidentUrl, features: windowFeatures }
+              )
+            ])
+            page = popup
+          }
 
-          // Clicar em "Create Damage Entry" na aba correspondente
+          await page.bringToFront().catch(() => {})
+          if (!page.url().startsWith(incidentUrl)) {
+            await page.goto(incidentUrl, { waitUntil: 'domcontentloaded' })
+          }
+
+          // Clicar em "Create Damage Entry" na janela correspondente
           const scopes = [page, ...page.frames()]
           let clickedAdd = false
 
@@ -870,7 +893,6 @@ export async function runSnowDamageAutomation(
           log(`✓ ${prefix} OK: ${row.bladeSerialNumber} — ${row.failureType}`)
 
           if (autoSubmit) {
-            // Fecha a aba processada se submetida automaticamente
             await page.close().catch(() => {})
           }
         } catch (err: any) {
@@ -884,10 +906,11 @@ export async function runSnowDamageAutomation(
       await Promise.all(batchPromises)
 
       if (!autoSubmit) {
-        log(`ℹ Lote de ${batch.length} formulário(s) preenchido(s) com sucesso e mantido(s) aberto(s) em ${batch.length} aba(s) para sua revisão!`)
+        log(`ℹ Lote de ${batch.length} formulário(s) preenchido(s) com sucesso e mantido(s) aberto(s) em ${batch.length} janela(s) separadas para sua revisão!`)
         break
       }
     }
+
 
     log(`Concluído: ${processed} ok, ${failed} falha(s) de ${rows.length}.`)
     return { success: true, processed, failed, errors }
