@@ -10,6 +10,7 @@ const MAX_LOGS = 800;
 
 export default function SnowAutomationModule({ D }) {
   const [excelPath, setExcelPath] = useState('');
+  const [localPhotosDir, setLocalPhotosDir] = useState('');
   const [incidentUrl, setIncidentUrl] = useState('');
   const [headless, setHeadless] = useState(false);
   const [startRow, setStartRow] = useState('');
@@ -67,7 +68,18 @@ export default function SnowAutomationModule({ D }) {
     if (picked) {
       setExcelPath(picked);
       loadBlades(picked);
+      const lastSlash = Math.max(picked.lastIndexOf('\\'), picked.lastIndexOf('/'));
+      if (lastSlash > -1) {
+        const folder = picked.substring(0, lastSlash);
+        setLocalPhotosDir(`${folder}\\Fotos`);
+      }
     }
+  };
+
+
+  const pickPhotosDir = async () => {
+    const picked = await window.pywebview.api.pick_folder();
+    if (picked) setLocalPhotosDir(picked);
   };
 
   const toggleBlade = (sn) => {
@@ -121,6 +133,7 @@ export default function SnowAutomationModule({ D }) {
     const options = {
       headless,
       selectedBlades,
+      localPhotosDir,
       ...(startRow ? { startRow: parseInt(startRow, 10) } : {}),
       ...(endRow ? { endRow: parseInt(endRow, 10) } : {}),
     };
@@ -173,7 +186,7 @@ export default function SnowAutomationModule({ D }) {
           color: D.textSecond,
           lineHeight: '1.5'
         }}>
-          Controle individual de pás e faixas de linhas ativado. Selecione apenas as pás que deseja automatizar para evitar duplicidades no ServiceNow.
+          Upload de fotos aprimorado: envia automaticamente as 2 fotos do Módulo 23 (pic1 com polígono desenhado + pic2 regional) da pasta local.
         </div>
 
         {/* Planilha */}
@@ -192,6 +205,27 @@ export default function SnowAutomationModule({ D }) {
             </div>
           </div>
         </div>
+
+        {/* Pasta de Fotos Locais do Módulo 23 */}
+        <div className="form-group">
+          <div className="field-label" style={{ color: D.textMuted }}>Pasta de Fotos Geradas (Módulo 23 - Fotos/)</div>
+          <div className="form-input-row">
+            <div
+              className={`input-field${localPhotosDir ? " filled" : ""}`}
+              onClick={!running ? pickPhotosDir : undefined}
+              style={{ cursor: running ? 'not-allowed' : 'pointer' }}
+            >
+              <span style={{ color: localPhotosDir ? accent : D.textMuted, flexShrink: 0 }}>🖼️</span>
+              <span className="input-field-text" title={localPhotosDir || 'Selecione a pasta Fotos/ (opcional)'}>
+                {localPhotosDir ? localPhotosDir.split('\\').pop() : 'Selecione a pasta Fotos/ (opcional)'}
+              </span>
+            </div>
+          </div>
+          <div style={{ fontSize: '10px', color: D.textMuted, marginTop: '4px' }}>
+            Se selecionada, envia pic1 (polígono) + pic2 (zoom regional). Se vazia, baixa do link.
+          </div>
+        </div>
+
 
         {/* Pás encontradas */}
         {excelPath && (

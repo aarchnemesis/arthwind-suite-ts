@@ -196,18 +196,43 @@ class DamageEntryFiller {
     await field.fill(String(value))
   }
 
-  private async uploadPhotos(urls: string[]): Promise<void> {
+  private async uploadPhotos(urls: string[], localPhotoFiles: string[] = []): Promise<void> {
     const tempPaths: string[] = []
     try {
-      for (let i = 0; i < urls.length; i++) {
-        const p = path.join(os.tmpdir(), `${String(i + 1).padStart(2, '0')}_arthwind_${Date.now()}_${i}.jpg`)
-        const buffer = await fetchBuffer(urls[i])
-        fs.writeFileSync(p, buffer)
-        tempPaths.push(p)
+      if (localPhotoFiles && localPhotoFiles.length > 0) {
+        // Envia as fotos locais geradas pelo Módulo 23:
+        // pic1: foto com o polígono desenhado
+        // pic2: foto regional com o zoom do defeito
+        for (let i = 0; i < localPhotoFiles.length; i++) {
+          const srcPath = localPhotoFiles[i]
+          const ext = path.extname(srcPath) || '.jpeg'
+          const dstPath = path.join(
+            os.tmpdir(),
+            `${String(i + 1).padStart(2, '0')}_arthwind_${Date.now()}_${i}${ext}`
+          )
+          fs.copyFileSync(srcPath, dstPath)
+          tempPaths.push(dstPath)
+        }
+        this.log(`  Enviando ${tempPaths.length} foto(s) gerada(s) pelo Módulo 23 (polígono + região)...`)
+      } else if (urls && urls.length > 0) {
+        // Fallback: faz o download das fotos a partir dos links da nuvem
+        for (let i = 0; i < urls.length; i++) {
+          const p = path.join(
+            os.tmpdir(),
+            `${String(i + 1).padStart(2, '0')}_arthwind_${Date.now()}_${i}.jpg`
+          )
+          const buffer = await fetchBuffer(urls[i])
+          fs.writeFileSync(p, buffer)
+          tempPaths.push(p)
+        }
+        this.log(`  Enviando ${tempPaths.length} foto(s) baixada(s) do link...`)
       }
-      const scope = this.getScope()
-      const fileInput = scope.locator('input[type="file"]').first()
-      await fileInput.setInputFiles(tempPaths)
+
+      if (tempPaths.length > 0) {
+        const scope = this.getScope()
+        const fileInput = scope.locator('input[type="file"]').first()
+        await fileInput.setInputFiles(tempPaths)
+      }
     } finally {
       for (const p of tempPaths) {
         try {
@@ -219,7 +244,7 @@ class DamageEntryFiller {
     }
   }
 
-  async fill(data: DamageReportRow): Promise<void> {
+  async fill(data: DamageReportRow, localPhotosDir?: string): Promise<void> {
     this.log(
       `Preenchendo: ${data.bladeSerialNumber} | ${data.failureType} | DF ${data.dfDistanceStart}-${data.dfDistanceEnd}`
     )
@@ -246,10 +271,10 @@ class DamageEntryFiller {
     await this.fillText('Size (mm)', data.sizeMm)
     await this.fillText('Amount of Findings', data.amountOfFindings ?? 1)
 
-    if (data.photoUrls?.length) {
-      this.log(`  Enviando ${data.photoUrls.length} foto(s)...`)
-      await this.uploadPhotos(data.photoUrls)
-    }
+    // Busca fotos locais geradas pelo Módulo 23 (_pic1.jpeg com polígono e _pic2.jpeg regional)
+    const localPhotos = localPhotosDir ? findLocalPhotosForDamage(localPhotosDir, data) : []
+    await this.uploadPhotos(data.photoUrls, localPhotos)
+
 
     // Botão de submissão do formulário: DEVE ser Submit/Save/Insert/Salvar,
     // E NÃO o botão "Create Damage Entry" que abre um formulário novo.
@@ -385,6 +410,54 @@ export async function getSpreadsheetBlades(
   }
 }
 
+// ─── Busca de Fotos Locais Geradas pelo Módulo 23 ───────────────────────────
+
+function findLocalPhotosForDamage(localPhotosDir: string, data: DamageReportRow): string[] {
+  if (!localPhotosDir || !fs.existsSync(localPhotosDir)) return []
+
+  // SN da pá (ex: "A1 811 0410 0115" -> "410")
+  const snMatch = data.bladeSerialNumber.match(/\b\d{3,4}\b/)
+  const shortSn = snMatch ? snMatch[0] : ''
+
+  // Padrão do DF (ex: "DF59-59.1" ou "DF59-59")
+  const dfPattern = `DF${data.dfDistanceStart}-${data.dfDistanceEnd}`
+
+  const matches: string[] = []
+
+  function scan(dir: string) {
+    try {
+      const items = fs.readdirSync(dir, { withFileTypes: true })
+      for (const item of items) {
+        const full = path.join(dir, item.name)
+        if (item.isDirectory()) {
+          scan(full)
+        } else if (item.isFile()) {
+          const lower = item.name.toLowerCase()
+          if (
+            (lower.includes('pic1') || lower.includes('pic2')) &&
+            (lower.includes(dfPattern.toLowerCase()) || lower.includes(`df${data.dfDistanceStart}`)) &&
+            (!shortSn || lower.includes(shortSn))
+          ) {
+            matches.push(full)
+          }
+        }
+      }
+    } catch {}
+  }
+
+  scan(localPhotosDir)
+
+  // Garante que pic1 (polígono) venha antes de pic2 (zoom regional)
+  matches.sort((a, b) => {
+    const aIsPic1 = a.toLowerCase().includes('pic1') ? 0 : 1
+    const bIsPic1 = b.toLowerCase().includes('pic1') ? 0 : 1
+    if (aIsPic1 !== bIsPic1) return aIsPic1 - bIsPic1
+    return a.localeCompare(b)
+  })
+
+  return matches
+}
+
 // ─── Entry point ──────────────────────────────────────────────────────────
 
 export interface RunAutomationOptions {
@@ -392,7 +465,9 @@ export interface RunAutomationOptions {
   startRow?: number // 1-based, inclusive
   endRow?: number // 1-based, inclusive
   selectedBlades?: string[] // Lista de seriais de pás selecionados para processar
+  localPhotosDir?: string // Pasta local com as fotos geradas pelo Módulo 23 (contendo _pic1 e _pic2)
 }
+
 
 export interface RunAutomationResult {
   success: boolean
@@ -487,7 +562,8 @@ export async function runSnowDamageAutomation(
 
 
         const filler = new DamageEntryFiller(page, (m) => log(`  ${prefix} ${m}`))
-        await filler.fill(row)
+        await filler.fill(row, options.localPhotosDir)
+
 
 
         processed++
