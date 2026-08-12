@@ -1186,103 +1186,70 @@ export async function runSnowDamageAutomation(
           context = await getContext(options.headless ?? false)
         }
 
-        // Identifica a página do relatório principal (Inspection Report)
-        let parentPage = context.pages().find((p) => !p.isClosed() && p.url().includes(incidentUrl.split('?')[0]))
-        if (!parentPage) {
-          parentPage = context.pages().find((p) => !p.isClosed()) || (await context.newPage())
-          await parentPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+        let targetPage: Page
+        if (autoSubmit) {
+          targetPage = context.pages().find((p) => !p.isClosed()) || (await context.newPage())
+        } else {
+          // No modo de conferência manual: abre uma NOVA ABA exclusiva no Chrome para cada linha i
+          targetPage = await context.newPage()
         }
 
-        await parentPage.bringToFront().catch(() => {})
+        await targetPage.bringToFront().catch(() => {})
+
+        if (!targetPage.url().includes(incidentUrl.split('?')[0])) {
+          await targetPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+        }
 
         // Checagem ao vivo na tabela Damage Report Entries do ServiceNow
-        const existsInSnow = await checkRowExistsInLiveTable(parentPage, row)
+        const existsInSnow = await checkRowExistsInLiveTable(targetPage, row)
         if (existsInSnow) {
           log(`  ℹ [SNOW Live Audit] Entrada para ${row.bladeSerialNumber} (${row.subComponent} DF ${row.dfDistanceStart}-${row.dfDistanceEnd}) já cadastrada na tabela do ServiceNow. Pulando...`)
           if (autoSubmit) markRowSubmitted(buildRowKey(incidentUrl, row))
+          if (!autoSubmit && context.pages().length > 1) {
+            await targetPage.close().catch(() => {})
+          }
           continue
         }
 
-        // Abre o formulário obtendo o link do Add Damage Entry ou criando uma nova aba dedicada via context.newPage()
-        let targetFormPage: Page | null = null
-
-        // 1. Tenta extrair o href do botão Add Damage Entry na página principal
-        let formHref: string | null = null
-        const scopes = [parentPage, ...parentPage.frames()]
-        for (const s of scopes) {
-          const btnLocators = [
-            s.locator('a, button', { hasText: /^add damage entry$/i }),
-            s.locator('a, button', { hasText: /^create damage entry$/i }),
-            s.getByRole('link', { name: /add damage entry|create damage entry/i }),
-            s.getByRole('button', { name: /add damage entry|create damage entry/i }),
-            s.locator('a, button', { hasText: /damage entry/i })
-          ]
-          for (const loc of btnLocators) {
-            try {
-              if (await loc.isVisible({ timeout: 800 }).catch(() => false)) {
-                const h = await loc.getAttribute('href').catch(() => null)
-                if (h) {
-                  formHref = h
+        // Clica no botão "Add Damage Entry" ou "Create Damage Entry" na targetPage
+        let clickedAdd = false
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const scopes = [targetPage, ...targetPage.frames()]
+          for (const s of scopes) {
+            const locators = [
+              s.locator('button, a', { hasText: /^add damage entry$/i }),
+              s.locator('button, a', { hasText: /^create damage entry$/i }),
+              s.getByRole('button', { name: /add damage entry|create damage entry|nova entrada/i }),
+              s.getByRole('link', { name: /add damage entry|create damage entry|nova entrada/i }),
+              s.getByText(/add damage entry|create damage entry/i).first()
+            ]
+            for (const loc of locators) {
+              try {
+                if (await loc.isVisible({ timeout: 800 }).catch(() => false)) {
+                  await loc.click({ force: true })
+                  clickedAdd = true
                   break
                 }
-              }
-            } catch {}
-          }
-          if (formHref) break
-        }
-
-        if (formHref) {
-          const origin = new URL(parentPage.url()).origin
-          const fullFormUrl = formHref.startsWith('http') ? formHref : `${origin}${formHref.startsWith('/') ? '' : '/'}${formHref}`
-          targetFormPage = await context.newPage()
-          await targetFormPage.goto(fullFormUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
-          await targetFormPage.bringToFront().catch(() => {})
-          log(`  ✓ Aberta nova aba limpa para a linha ${prefix}`)
-        } else {
-          // Fallback: clica no botão interceptando popup
-          const initialCount = context.pages().filter((p) => !p.isClosed()).length
-          const popupPromise = context.waitForEvent('page', { timeout: 4000 }).catch(() => null)
-
-          let clickedAdd = false
-          for (let attempt = 0; attempt < 5; attempt++) {
-            for (const s of scopes) {
-              const locators = [
-                s.locator('button, a', { hasText: /^add damage entry$/i }),
-                s.locator('button, a', { hasText: /^create damage entry$/i }),
-                s.getByRole('button', { name: /add damage entry|create damage entry|nova entrada/i }),
-                s.getByRole('link', { name: /add damage entry|create damage entry|nova entrada/i }),
-                s.getByText(/add damage entry|create damage entry/i).first()
-              ]
-              for (const loc of locators) {
-                try {
-                  if (await loc.isVisible({ timeout: 800 }).catch(() => false)) {
-                    await loc.click({ force: true })
-                    clickedAdd = true
-                    break
-                  }
-                } catch {}
-              }
-              if (clickedAdd) break
+              } catch {}
             }
             if (clickedAdd) break
-            await parentPage.waitForTimeout(800)
           }
-
-          const newPopupPage = await popupPromise
-          if (newPopupPage && !newPopupPage.isClosed()) {
-            targetFormPage = newPopupPage
-          } else {
-            const currentPages = context.pages().filter((p) => !p.isClosed())
-            if (currentPages.length > initialCount) {
-              targetFormPage = currentPages[currentPages.length - 1]
-            } else {
-              targetFormPage = parentPage
-            }
-          }
-          await targetFormPage.bringToFront().catch(() => {})
+          if (clickedAdd) break
+          await targetPage.waitForTimeout(800)
         }
 
+        if (!clickedAdd) {
+          await targetPage
+            .locator('button, a', { hasText: /add damage entry|create damage entry/i })
+            .first()
+            .click({ force: true })
+            .catch(() => {})
+        }
 
+        // Se o clique abriu um popup em uma sub-aba, usa a aba mais recente
+        const activePages = context.pages().filter((p) => !p.isClosed())
+        const formPage = activePages[activePages.length - 1] || targetPage
+        await formPage.bringToFront().catch(() => {})
 
         const checkFormReady = async (p: Page): Promise<boolean> => {
           const scopes = [p, ...p.frames()]
@@ -1296,15 +1263,15 @@ export async function runSnowDamageAutomation(
           return false
         }
 
-        let isFormReady = await checkFormReady(targetFormPage)
+        let isFormReady = await checkFormReady(formPage)
         if (!isFormReady) {
-          await targetFormPage.waitForTimeout(2500)
-          isFormReady = await checkFormReady(targetFormPage)
+          await formPage.waitForTimeout(2500)
+          isFormReady = await checkFormReady(formPage)
         }
 
         if (!isFormReady) {
-          log(`  ⚠ O formulário de cadastro não abriu na aba de destino. Recarregando página do relatório...`)
-          await parentPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+          log(`  ⚠ O formulário de cadastro não abriu na aba. Recarregando página do relatório...`)
+          await formPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
           throw new Error("A tela 'Create Damage Entry' não carregou a tempo.")
         }
 
@@ -1317,7 +1284,7 @@ export async function runSnowDamageAutomation(
           localPhotos = findLocalPhotosForDamage(options.localPhotosDir, row)
         }
 
-        const filler = new DamageEntryFiller(targetFormPage, (m) => log(`  ${prefix} ${m}`))
+        const filler = new DamageEntryFiller(formPage, (m) => log(`  ${prefix} ${m}`))
         await filler.fill(row, localPhotos, autoSubmit)
 
         processed++
@@ -1331,10 +1298,8 @@ export async function runSnowDamageAutomation(
         log(`✓ ${prefix} OK: ${row.bladeSerialNumber} — ${row.failureType}`)
 
         if (autoSubmit) {
-          // Aguarda ServiceNow processar o submit nativo sem causar race condition
-          await targetFormPage.waitForTimeout(2000)
-
-          const scopes = [parentPage, ...parentPage.frames()]
+          await formPage.waitForTimeout(2000)
+          const scopes = [formPage, ...formPage.frames()]
           let canSeeCreateBtn = false
           for (const s of scopes) {
             const hasBtn = await s.getByRole('button', { name: /create damage entry|add damage entry|nova entrada/i }).isVisible({ timeout: 500 }).catch(() => false)
@@ -1345,7 +1310,7 @@ export async function runSnowDamageAutomation(
           }
 
           if (!canSeeCreateBtn) {
-            await parentPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+            await formPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
           }
         } else {
           log(`  ℹ Formulário [${i + 1}/${rows.length}] mantido aberto na tela para revisão. Avançando para a próxima linha...`)
@@ -1357,6 +1322,7 @@ export async function runSnowDamageAutomation(
         log(msg)
       }
     }
+
 
     if (!autoSubmit) {
       log(`ℹ Concluído! ${processed} formulário(s) preenchido(s) com sucesso e mantido(s) aberto(s) em abas/janelas para sua revisão final.`)
