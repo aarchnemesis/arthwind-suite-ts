@@ -828,7 +828,19 @@ export function findLocalPhotosForDamage(localPhotosDir: string, data: DamageRep
             } else if (lower.includes('pic2')) {
               pic2Files.push(full)
             } else if (isVid) {
-              const targetName = `B${shortSn}_S1_SS_DF45-50.mp4`
+              let secCode = 'S1'
+              if (/section\s*2|s2/i.test(data.bladeSection)) secCode = 'S2'
+
+              let areaCode = 'SS'
+              if (/ps|pressure/i.test(data.bladeArea)) areaCode = 'PS'
+
+              // Se o nome do arquivo indicar S1/S2 ou PS/SS diferente do esperado nesta linha, ignora
+              if (lower.includes('s1') && secCode !== 'S1') continue
+              if (lower.includes('s2') && secCode !== 'S2') continue
+              if (lower.includes('ps') && areaCode !== 'PS') continue
+              if (lower.includes('ss') && areaCode !== 'SS') continue
+
+              const targetName = `B${shortSn}_${secCode}_${areaCode}_DF45-50.mp4`
               const dst = path.join(os.tmpdir(), targetName)
               try {
                 fs.copyFileSync(full, dst)
@@ -837,6 +849,7 @@ export function findLocalPhotosForDamage(localPhotosDir: string, data: DamageRep
                 videoFiles.push(full)
               }
             }
+
           }
 
         }

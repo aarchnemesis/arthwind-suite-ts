@@ -898,9 +898,19 @@ export async function processSnowExcel(
     }
   }
 
-  // Add 1 Video row per unique blade with strict DF45-50 nomenclature
+  // Create empty Videos directory for turbine
+  const videosFolder = path.join(path.dirname(photosFolder), 'Videos')
+  fs.mkdirSync(videosFolder, { recursive: true })
+
+  // Add 4 Video rows per unique blade (S1 PS, S1 SS, S2 PS, S2 SS) with strict DF45-50 nomenclature
+  const videoVariants = [
+    { sec: 'Section 1', area: 'PS', secCode: 'S1', areaCode: 'PS' },
+    { sec: 'Section 1', area: 'SS', secCode: 'S1', areaCode: 'SS' },
+    { sec: 'Section 2', area: 'PS', secCode: 'S2', areaCode: 'PS' },
+    { sec: 'Section 2', area: 'SS', secCode: 'S2', areaCode: 'SS' }
+  ]
+
   for (const [, bInfo] of uniqueBladesMap) {
-    const videoFileName = `B${bInfo.shortSn}_S1_SS_DF45-50.mp4`
     const videoDamageDesc = [
       'Inspection as per SN_241',
       `Blade: S/N${bInfo.shortSn} Set ${bInfo.setNumber}`,
@@ -908,24 +918,28 @@ export async function processSnowExcel(
       'Type of Failure is Missing'
     ].join('\n')
 
-    outWs.addRow([
-      bInfo.fullBladeSerial,         // A — Blade serial number
-      'Blade Inside - Shell',        // B — Sub Component
-      'Type of Failure is Missing',  // C — Failure Type
-      videoDamageDesc,               // D — Damage Description
-      45,                            // E — DF distance Start (STRICTLY 45)
-      50,                            // F — DF distance End (STRICTLY 50)
-      0,                             // G — Profile Depth Start
-      0,                             // H — Profile Depth End
-      'Inside',                      // I — Inside/Outside
-      'Section 1',                   // J — Blade section
-      'Shell',                       // K — Blade sub-section
-      'SS',                          // L — Blade area
-      0,                             // M — Size mm
-      videoFileName,                 // N — Video filename requirement
-      null,                          // O — Turbine SN
-      null                           // P — POI
-    ])
+    for (const v of videoVariants) {
+      const videoFileName = `B${bInfo.shortSn}_${v.secCode}_${v.areaCode}_DF45-50.mp4`
+
+      outWs.addRow([
+        bInfo.fullBladeSerial,         // A — Blade serial number
+        'Blade Inside - Shell',        // B — Sub Component
+        'Type of Failure is Missing',  // C — Failure Type
+        videoDamageDesc,               // D — Damage Description
+        45,                            // E — DF distance Start (STRICTLY 45)
+        50,                            // F — DF distance End (STRICTLY 50)
+        0,                             // G — Profile Depth Start
+        0,                             // H — Profile Depth End
+        'Inside',                      // I — Inside/Outside
+        v.sec,                         // J — Blade section ("Section 1" / "Section 2")
+        'Shell',                       // K — Blade sub-section
+        v.area,                        // L — Blade area ("PS" / "SS")
+        0,                             // M — Size mm
+        videoFileName,                 // N — Video filename requirement
+        null,                          // O — Turbine SN
+        null                           // P — POI
+      ])
+    }
   }
 
   // Add 5 blank image rows
@@ -949,6 +963,7 @@ export async function processSnowExcel(
       null,                             // P
     ])
   }
+
 
 
   // Save the Excel file
