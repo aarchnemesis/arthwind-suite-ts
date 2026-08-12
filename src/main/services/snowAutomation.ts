@@ -566,7 +566,7 @@ class DamageEntryFiller {
 // E DF Start | F DF End | G PD Start | H PD End | I Inside/Outside |
 // J Blade section | K Blade sub-section | L Blade area | M Size | N Link das fotos
 
-async function readDamageRows(excelPath: string): Promise<DamageReportRow[]> {
+async function readDamageRows(excelPath: string, options?: RunAutomationOptions): Promise<DamageReportRow[]> {
   const wb = new ExcelJS.Workbook()
   await wb.xlsx.readFile(excelPath)
   const ws = wb.worksheets[0]
@@ -582,6 +582,9 @@ async function readDamageRows(excelPath: string): Promise<DamageReportRow[]> {
     let bladeSerial = rawBlade
 
     if (rawBlade.toLowerCase() === 'blank image') {
+      if (!options?.includeBlankImages) {
+        continue
+      }
       isBlankImage = true
       bladeSerial = lastValidBladeSerial
     } else {
@@ -589,6 +592,7 @@ async function readDamageRows(excelPath: string): Promise<DamageReportRow[]> {
     }
 
     if (!bladeSerial) continue
+
 
     const photoLinkRaw = String(row.getCell(14).value ?? '').trim()
     const photoUrls = photoLinkRaw
@@ -718,12 +722,13 @@ export async function getSpreadsheetBlades(
 export interface LocalPhotoPair {
   pic1Path?: string
   pic2Path?: string
+  videoPath?: string
 }
 
 /**
  * Mapeia previamente a pasta Fotos/ gerada pelo Módulo 23 no início da automação.
  * Indexa cada defeito pelas chaves (ex.: "0413_df58.5" ou "0413_df58.5-59")
- * com os caminhos absolutos exatos das fotos pic1.jpeg e pic2.jpeg no disco.
+ * com os caminhos absolutos exatos das fotos pic1.jpeg, pic2.jpeg e vídeos (mp4/mov/avi) no disco.
  */
 export function buildLocalPhotosMap(localPhotosDir: string): Map<string, LocalPhotoPair> {
   const map = new Map<string, LocalPhotoPair>()
@@ -738,7 +743,9 @@ export function buildLocalPhotosMap(localPhotosDir: string): Map<string, LocalPh
           scan(full)
         } else if (item.isFile()) {
           const lower = item.name.toLowerCase()
-          if (!lower.endsWith('.jpeg') && !lower.endsWith('.jpg') && !lower.endsWith('.png')) continue
+          const isImg = lower.endsWith('.jpeg') || lower.endsWith('.jpg') || lower.endsWith('.png')
+          const isVid = lower.endsWith('.mp4') || lower.endsWith('.mov') || lower.endsWith('.avi') || lower.endsWith('.mkv')
+          if (!isImg && !isVid) continue
 
           // Procura o S/N da pá no nome do arquivo ou nas pastas pai
           const shortSn = extractBladeSn(item.name).toLowerCase()
@@ -755,6 +762,8 @@ export function buildLocalPhotosMap(localPhotosDir: string): Map<string, LocalPh
               entry.pic1Path = full
             } else if (lower.includes('pic2')) {
               entry.pic2Path = full
+            } else if (isVid || lower.includes('video') || lower.includes('vid')) {
+              entry.videoPath = full
             }
           }
         }
@@ -779,6 +788,7 @@ export function findLocalPhotosFromMap(photosMap: Map<string, LocalPhotoPair>, d
   if (entry) {
     if (entry.pic1Path) result.push(entry.pic1Path)
     if (entry.pic2Path) result.push(entry.pic2Path)
+    if (entry.videoPath) result.push(entry.videoPath)
   }
 
   return result
@@ -792,6 +802,7 @@ export function findLocalPhotosForDamage(localPhotosDir: string, data: DamageRep
 
   const pic1Files: string[] = []
   const pic2Files: string[] = []
+  const videoFiles: string[] = []
 
   function scan(dir: string) {
     try {
@@ -802,7 +813,9 @@ export function findLocalPhotosForDamage(localPhotosDir: string, data: DamageRep
           scan(full)
         } else if (item.isFile()) {
           const lower = item.name.toLowerCase()
-          if (!lower.endsWith('.jpeg') && !lower.endsWith('.jpg') && !lower.endsWith('.png')) continue
+          const isImg = lower.endsWith('.jpeg') || lower.endsWith('.jpg') || lower.endsWith('.png')
+          const isVid = lower.endsWith('.mp4') || lower.endsWith('.mov') || lower.endsWith('.avi') || lower.endsWith('.mkv')
+          if (!isImg && !isVid) continue
 
           // Verifica se o caminho absoluto ou o nome do arquivo contém a pá (ex: "0413" ou "b0413")
           const hasSn = !shortSn || lower.includes(shortSn) || full.toLowerCase().includes(`\\${shortSn}\\`) || full.toLowerCase().includes(`/${shortSn}/`)
@@ -812,6 +825,7 @@ export function findLocalPhotosForDamage(localPhotosDir: string, data: DamageRep
           if (hasSn && hasDf) {
             if (lower.includes('pic1')) pic1Files.push(full)
             else if (lower.includes('pic2')) pic2Files.push(full)
+            else if (isVid) videoFiles.push(full)
           }
         }
       }
@@ -823,6 +837,7 @@ export function findLocalPhotosForDamage(localPhotosDir: string, data: DamageRep
   const result: string[] = []
   if (pic1Files.length > 0) result.push(pic1Files[0])
   if (pic2Files.length > 0) result.push(pic2Files[0])
+  if (videoFiles.length > 0) result.push(videoFiles[0])
 
   return result
 }
@@ -836,6 +851,7 @@ export interface RunAutomationOptions {
   selectedBlades?: string[] // Lista de seriais de pás selecionados para processar
   localPhotosDir?: string // Pasta local com as fotos geradas pelo Módulo 23 (contendo _pic1 e _pic2)
   autoSubmit?: boolean // Se true, clica em Submit no formulário. Padrão: false.
+  includeBlankImages?: boolean // Se true, inclui as 5 linhas Blank Image (para turbinas/inspeções com < 5 defeitos)
 }
 
 export interface RunAutomationResult {
@@ -847,7 +863,6 @@ export interface RunAutomationResult {
 }
 
 export async function runSnowDamageAutomation(
-
   excelPath: string,
   incidentUrl: string,
   options: RunAutomationOptions,
@@ -855,10 +870,11 @@ export async function runSnowDamageAutomation(
 ): Promise<RunAutomationResult> {
   const log = log_fn || (() => {})
   try {
-    const allRows = await readDamageRows(excelPath)
+    const allRows = await readDamageRows(excelPath, options)
     if (allRows.length === 0) {
       return { success: false, processed: 0, failed: 0, errors: [], error: 'Nenhuma linha válida na planilha.' }
     }
+
 
     // Mapeia previamente todas as fotos da pasta local Fotos/ do Módulo 23
     const photosMap = options.localPhotosDir ? buildLocalPhotosMap(options.localPhotosDir) : new Map()

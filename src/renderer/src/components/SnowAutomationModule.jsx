@@ -14,9 +14,10 @@ export default function SnowAutomationModule({ D }) {
   const [incidentUrl, setIncidentUrl] = useState('');
   const [headless, setHeadless] = useState(false);
   const [autoSubmit, setAutoSubmit] = useState(false);
-  const [concurrency, setConcurrency] = useState(5);
+  const [includeBlankImages, setIncludeBlankImages] = useState(false);
   const [startRow, setStartRow] = useState('');
   const [endRow, setEndRow] = useState('');
+
   const [blades, setBlades] = useState([]);
   const [selectedBlades, setSelectedBlades] = useState([]);
   const [loadingBlades, setLoadingBlades] = useState(false);
@@ -139,10 +140,11 @@ export default function SnowAutomationModule({ D }) {
       selectedBlades,
       localPhotosDir,
       autoSubmit,
-      concurrency: parseInt(concurrency, 10) || 5,
+      includeBlankImages,
       ...(startRow ? { startRow: parseInt(startRow, 10) } : {}),
       ...(endRow ? { endRow: parseInt(endRow, 10) } : {}),
     };
+
 
 
 
@@ -395,7 +397,7 @@ export default function SnowAutomationModule({ D }) {
           </div>
         </div>
 
-        {/* Headless & Submissão */}
+        {/* Headless, Submissão & Blank Image */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: D.textSecond, cursor: 'pointer' }}>
             <input type="checkbox" checked={headless} onChange={(e) => setHeadless(e.target.checked)} disabled={running} />
@@ -405,7 +407,12 @@ export default function SnowAutomationModule({ D }) {
             <input type="checkbox" checked={autoSubmit} onChange={(e) => setAutoSubmit(e.target.checked)} disabled={running} />
             Submeter formulário automaticamente (desativado = apenas preenche)
           </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: D.textSecond, cursor: 'pointer' }}>
+            <input type="checkbox" checked={includeBlankImages} onChange={(e) => setIncludeBlankImages(e.target.checked)} disabled={running} />
+            Incluir 5 entradas "Blank Image" (para inspeções com menos de 5 defeitos)
+          </label>
         </div>
+
 
 
 
