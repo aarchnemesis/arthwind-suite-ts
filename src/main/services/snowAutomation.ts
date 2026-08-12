@@ -111,9 +111,14 @@ class DamageEntryFiller {
 
   /** Widget de combobox custom do ServiceNow (Select2 / sn-select) — clica pra
    * abrir, filtra pela caixa de busca se ela aparecer, clica na opção com fallbacks. */
-  private async selectFromComboBox(fieldLabel: string, optionText: string): Promise<void> {
+  private async selectFromComboBox(
+    fieldLabel: string,
+    optionText: string,
+    waitAfterMs: number = 600
+  ): Promise<void> {
     if (!optionText) return
     const scope = this.getScope()
+    this.log(`    Selecionando [${fieldLabel}]: "${optionText}"`)
 
     // No Select2 do ServiceNow, o elemento de foco (.select2-focusser) fica sob o container visível (<a class="select2-choice">).
     // O clique direto no focusser causa "intercepts pointer events". Usar { force: true } no container visível resolve 100%.
@@ -121,9 +126,9 @@ class DamageEntryFiller {
 
     // 1. Tentar localizar o container visível do Select2 associado à label
     const openCandidates = [
-      // Container pai do Select2 que contém o label ou a classe select2-choice
       scope.locator('.select2-container').filter({ has: scope.getByText(fieldLabel, { exact: false }) }).locator('.select2-choice').first(),
       scope.locator('div.form-group', { hasText: fieldLabel }).locator('.select2-choice, .select2-container').first(),
+      scope.locator('.form-group, .sc-form-field').filter({ hasText: fieldLabel }).locator('.select2-choice').first(),
       scope.locator('.select2-choice').first(),
       scope.getByRole('combobox', { name: fieldLabel }).first(),
       scope.getByLabel(fieldLabel, { exact: false }).first()
@@ -155,7 +160,7 @@ class DamageEntryFiller {
 
     if (await searchBox.isVisible({ timeout: 1500 }).catch(() => false)) {
       await searchBox.fill(optionText)
-      await this.page.waitForTimeout(300) // filtro client-side
+      await this.page.waitForTimeout(400) // tempo pro Select2 filtrar as opções no DOM
     }
 
     // 3. Seletores em cascata de fallback pra cobrir a estrutura Select2 e papéis ARIA do ServiceNow
@@ -187,6 +192,9 @@ class DamageEntryFiller {
       // Tenta um clique forçado caso o elemento esteja oculto por overlay
       await scope.getByText(optionText, { exact: true }).first().click({ force: true }).catch(() => {})
     }
+
+    // Aguarda a reação/cascata client-side do ServiceNow para popular os campos dependentes (ex: Sub Component -> Failure Type)
+    await this.page.waitForTimeout(waitAfterMs)
   }
 
   private async fillText(fieldLabel: string, value: string | number): Promise<void> {
@@ -246,12 +254,13 @@ class DamageEntryFiller {
 
   async fill(data: DamageReportRow, localPhotosDir?: string): Promise<void> {
     this.log(
-      `Preenchendo: ${data.bladeSerialNumber} | ${data.failureType} | DF ${data.dfDistanceStart}-${data.dfDistanceEnd}`
+      `Preenchendo: ${data.bladeSerialNumber} | ${data.subComponent} | ${data.failureType} | DF ${data.dfDistanceStart}-${data.dfDistanceEnd}`
     )
 
-    await this.selectFromComboBox('Blade serial number', data.bladeSerialNumber)
-    await this.selectFromComboBox('Sub Component', data.subComponent)
-    await this.selectFromComboBox('Failure Type', data.failureType)
+    await this.selectFromComboBox('Blade serial number', data.bladeSerialNumber, 800)
+    // 1200ms de espera após selecionar Sub Component para permitir que o ServiceNow execute o Script Client que popula o Failure Type
+    await this.selectFromComboBox('Sub Component', data.subComponent, 1200)
+    await this.selectFromComboBox('Failure Type', data.failureType, 800)
 
     if (data.damageDescription) {
       await this.fillText('Damage Description', data.damageDescription)
@@ -263,13 +272,14 @@ class DamageEntryFiller {
     await this.fillText('Profile Depth (%) End', data.profileDepthEnd)
 
     // Cascata: cada campo só popula de verdade depois do anterior ser escolhido.
-    await this.selectFromComboBox('Inside/Outside', data.insideOutside)
-    await this.selectFromComboBox('Blade section', data.bladeSection)
-    await this.selectFromComboBox('Blade sub-section', data.bladeSubSection)
-    await this.selectFromComboBox('Blade area', data.bladeArea)
+    await this.selectFromComboBox('Inside/Outside', data.insideOutside, 800)
+    await this.selectFromComboBox('Blade section', data.bladeSection, 800)
+    await this.selectFromComboBox('Blade sub-section', data.bladeSubSection, 800)
+    await this.selectFromComboBox('Blade area', data.bladeArea, 800)
 
     await this.fillText('Size (mm)', data.sizeMm)
     await this.fillText('Amount of Findings', data.amountOfFindings ?? 1)
+
 
     // Busca fotos locais geradas pelo Módulo 23 (_pic1.jpeg com polígono e _pic2.jpeg regional)
     const localPhotos = localPhotosDir ? findLocalPhotosForDamage(localPhotosDir, data) : []
