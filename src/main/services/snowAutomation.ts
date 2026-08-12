@@ -877,6 +877,48 @@ export interface RunAutomationOptions {
   localPhotosDir?: string // Pasta local com as fotos geradas pelo Módulo 23 (contendo _pic1 e _pic2)
   autoSubmit?: boolean // Se true, clica em Submit no formulário. Padrão: false.
   includeBlankImages?: boolean // Se true, inclui as 5 linhas Blank Image (para turbinas/inspeções com < 5 defeitos)
+  skipSubmitted?: boolean // Se true, pula linhas já submetidas no histórico
+}
+
+function getSubmittedStorePath(): string {
+  const appData = process.env.APPDATA || path.join(os.homedir(), '.config')
+  const dir = path.join(appData, 'ArthwindSuite')
+  fs.mkdirSync(dir, { recursive: true })
+  return path.join(dir, 'snow_submitted_rows.json')
+}
+
+export function loadSubmittedRows(): Set<string> {
+  try {
+    const storePath = getSubmittedStorePath()
+    if (fs.existsSync(storePath)) {
+      const data = JSON.parse(fs.readFileSync(storePath, 'utf-8'))
+      return new Set(data)
+    }
+  } catch {}
+  return new Set()
+}
+
+export function markRowSubmitted(rowKey: string) {
+  try {
+    const store = loadSubmittedRows()
+    store.add(rowKey)
+    const storePath = getSubmittedStorePath()
+    fs.writeFileSync(storePath, JSON.stringify(Array.from(store), null, 2))
+  } catch {}
+}
+
+export function clearSubmittedRowsStore() {
+  try {
+    const storePath = getSubmittedStorePath()
+    if (fs.existsSync(storePath)) {
+      fs.unlinkSync(storePath)
+    }
+  } catch {}
+}
+
+export function buildRowKey(incidentUrl: string, row: DamageReportRow): string {
+  const shortSn = extractBladeSn(row.bladeSerialNumber)
+  return `${incidentUrl}_${shortSn}_${row.subComponent}_${row.failureType}_${row.dfDistanceStart}_${row.dfDistanceEnd}_${row.bladeSection}_${row.bladeArea}`
 }
 
 export interface RunAutomationResult {
@@ -900,7 +942,6 @@ export async function runSnowDamageAutomation(
       return { success: false, processed: 0, failed: 0, errors: [], error: 'Nenhuma linha válida na planilha.' }
     }
 
-
     // Mapeia previamente todas as fotos da pasta local Fotos/ do Módulo 23
     const photosMap = options.localPhotosDir ? buildLocalPhotosMap(options.localPhotosDir) : new Map()
     if (photosMap.size > 0) {
@@ -921,7 +962,20 @@ export async function runSnowDamageAutomation(
 
     const start = Math.max(0, (options.startRow ?? 1) - 1)
     const end = Math.min(filteredRows.length, options.endRow ?? filteredRows.length)
-    const rows = filteredRows.slice(start, end)
+    const slicedRows = filteredRows.slice(start, end)
+
+    const skipSubmitted = options.skipSubmitted ?? true
+    const submittedStore = loadSubmittedRows()
+
+    let rows = slicedRows
+    if (skipSubmitted && submittedStore.size > 0) {
+      const initialCount = slicedRows.length
+      rows = slicedRows.filter((r) => !submittedStore.has(buildRowKey(incidentUrl, r)))
+      const skippedCount = initialCount - rows.length
+      if (skippedCount > 0) {
+        log(`ℹ ${skippedCount} linha(s) já submetida(s) no histórico foram ignoradas. (${rows.length} restante(s))`)
+      }
+    }
 
     const autoSubmit = options.autoSubmit ?? false
 
@@ -945,7 +999,6 @@ export async function runSnowDamageAutomation(
 
         let page: Page
         if (autoSubmit) {
-          // No modo autoSubmit, reutiliza a página existente para evitar que o fechamento da última aba encerre o perfil do Chrome
           page = context.pages().find((p) => !p.isClosed()) || (await context.newPage())
         } else {
           page = (i === 0)
@@ -954,8 +1007,10 @@ export async function runSnowDamageAutomation(
         }
 
         await page.bringToFront().catch(() => {})
-        if (!page.url().startsWith(incidentUrl)) {
-          await page.goto(incidentUrl, { waitUntil: 'domcontentloaded' }).catch(() => {})
+
+        // Se a página não estiver no relatório, navega
+        if (!page.url().includes(incidentUrl.split('?')[0])) {
+          await page.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
         }
 
         // Busca o botão "Create Damage Entry" na página principal ou em iFrames com até 10 tentativas
@@ -1008,11 +1063,29 @@ export async function runSnowDamageAutomation(
         await filler.fill(row, localPhotos, autoSubmit)
 
         processed++
+        const rowKey = buildRowKey(incidentUrl, row)
+        markRowSubmitted(rowKey)
+
         log(`✓ ${prefix} OK: ${row.bladeSerialNumber} — ${row.failureType}`)
 
         if (autoSubmit) {
-          // Em autoSubmit, redireciona a própria página de volta ao relatório principal em vez de fechar a aba
-          await page.goto(incidentUrl, { waitUntil: 'domcontentloaded' }).catch(() => {})
+          // Aguarda ServiceNow processar o submit nativo sem causar race condition
+          await page.waitForTimeout(2000)
+
+          // Verifica se a própria submissão já retornou para a página com o botão Create Damage Entry
+          const scopes = [page, ...page.frames()]
+          let canSeeCreateBtn = false
+          for (const s of scopes) {
+            const hasBtn = await s.getByRole('button', { name: /create damage entry|add damage entry|nova entrada/i }).isVisible({ timeout: 500 }).catch(() => false)
+            if (hasBtn) {
+              canSeeCreateBtn = true
+              break
+            }
+          }
+
+          if (!canSeeCreateBtn) {
+            await page.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+          }
         } else {
           log(`  ℹ Formulário [${i + 1}/${rows.length}] mantido aberto na tela para revisão. Avançando para a próxima linha...`)
         }
@@ -1023,6 +1096,7 @@ export async function runSnowDamageAutomation(
         log(msg)
       }
     }
+
 
 
     if (!autoSubmit) {

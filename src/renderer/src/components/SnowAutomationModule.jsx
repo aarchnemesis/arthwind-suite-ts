@@ -15,7 +15,9 @@ export default function SnowAutomationModule({ D }) {
   const [headless, setHeadless] = useState(false);
   const [autoSubmit, setAutoSubmit] = useState(false);
   const [includeBlankImages, setIncludeBlankImages] = useState(false);
+  const [skipSubmitted, setSkipSubmitted] = useState(true);
   const [startRow, setStartRow] = useState('');
+
   const [endRow, setEndRow] = useState('');
 
   const [blades, setBlades] = useState([]);
@@ -141,9 +143,11 @@ export default function SnowAutomationModule({ D }) {
       localPhotosDir,
       autoSubmit,
       includeBlankImages,
+      skipSubmitted,
       ...(startRow ? { startRow: parseInt(startRow, 10) } : {}),
       ...(endRow ? { endRow: parseInt(endRow, 10) } : {}),
     };
+
 
 
 
@@ -411,7 +415,12 @@ export default function SnowAutomationModule({ D }) {
             <input type="checkbox" checked={includeBlankImages} onChange={(e) => setIncludeBlankImages(e.target.checked)} disabled={running} />
             Incluir 5 entradas "Blank Image" (para inspeções com menos de 5 defeitos)
           </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: D.textSecond, cursor: 'pointer' }}>
+            <input type="checkbox" checked={skipSubmitted} onChange={(e) => setSkipSubmitted(e.target.checked)} disabled={running} />
+            Ignorar defeitos já submetidos no histórico (evita duplicatas ao reiniciar)
+          </label>
         </div>
+
 
 
 
