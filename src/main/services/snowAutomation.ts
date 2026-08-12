@@ -268,16 +268,29 @@ class DamageEntryFiller {
           .or(scope.locator('a, button', { hasText: /attachment/i }))
           .first()
 
+        let setViaChooser = false
         if (await attachmentBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
+          // Intercepta o evento 'filechooser' nativo do Chromium para impedir a abertura da janela do Windows Explorer
+          const fileChooserPromise = this.page.waitForEvent('filechooser', { timeout: 3000 }).catch(() => null)
           await attachmentBtn.click({ force: true }).catch(() => {})
-          await this.page.waitForTimeout(300)
+          const fileChooser = await fileChooserPromise
+
+          if (fileChooser) {
+            await fileChooser.setFiles(tempPaths)
+            setViaChooser = true
+            this.log(`  ✓ ${tempPaths.length} foto(s) anexadas via filechooser interceptado (sem janela do Explorer)!`)
+          }
         }
 
-        // 2. Injeta os caminhos exatos dos arquivos diretamente via setInputFiles
-        const fileInput = scope.locator('input[type="file"]').last().or(scope.locator('input[type="file"]').first())
-        await fileInput.setInputFiles(tempPaths)
-        this.log(`  ✓ ${tempPaths.length} foto(s) anexadas diretamente sem abrir o Explorer!`)
-        await this.page.waitForTimeout(1000)
+        if (!setViaChooser) {
+          // Fallback de injeção direta no input[type="file"]
+          const fileInput = scope.locator('input[type="file"]').last().or(scope.locator('input[type="file"]').first())
+          await fileInput.setInputFiles(tempPaths)
+          this.log(`  ✓ ${tempPaths.length} foto(s) anexadas via input direto no DOM!`)
+        }
+
+        await this.page.waitForTimeout(1200)
+
       }
     } catch (err: any) {
       this.log(`  ⚠ Erro no upload de fotos: ${err.message || err}`)
