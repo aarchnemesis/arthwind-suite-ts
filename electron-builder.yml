@@ -9,6 +9,12 @@ files:
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  # Pasta de referência/calibração (fotos de pás, PDFs, dados de turbina) que nunca
+  # deveria ter ido pro instalador — 243MB, foi o motivo real do salto de tamanho
+  # entre v1.5.2 e v1.5.3 (não foi o Playwright). Só precisa existir localmente pra
+  # quem estiver calibrando, não dentro do app empacotado.
+  - '!_bruteforce_review/**'
+  - '!_bruteforce_review'
 asarUnpack:
   - resources/**
   - node_modules/sharp/**

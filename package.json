@@ -1,6 +1,6 @@
 {
   "name": "arthwind-suite-ts",
-  "version": "1.5.4",
+  "version": "1.6.0",
   "description": "An Electron application with React and TypeScript",
   "main": "./out/main/index.js",
   "author": "example.com",
@@ -30,6 +30,7 @@
     "imapflow": "^1.4.3",
     "jszip": "^3.10.1",
     "mailparser": "^3.9.12",
+    "playwright": "^1.62.1",
     "sharp": "^0.35.3",
     "three": "^0.185.1"
   },

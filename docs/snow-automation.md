@@ -1,0 +1,1188 @@
+# Automação do Damage Report Entry (SNOW)
+
+Módulo 24, `SnowAutomationModule.jsx` + `src/main/services/snowAutomation.ts`.
+
+## O que faz
+
+Lê a planilha já gerada pelo SNOW Processor (módulo 23, mesmo layout de
+`OUTPUT_HEADERS` de `snowProcessor.ts`) e preenche automaticamente o
+formulário "Create Damage Report Entry" na plataforma SNOW, linha por linha,
+via navegador controlado (Playwright/Chromium).
+
+## Sessão de login
+
+Usa um perfil de navegador **persistente** (`launchPersistentContext`),
+salvo em `%APPDATA%/ArthwindSuite/snow_browser_profile`. Login feito
+manualmente uma vez (botão "Abrir p/ Login") continua valendo nas próximas
+execuções — só precisa logar de novo quando a sessão expirar de verdade do
+lado do ServiceNow, não a cada abertura do app.
+
+## Widget dos campos — NÃO é `<select>` nativo
+
+Confirmado via prints reais do formulário: os campos ("Blade serial number",
+"Sub Component", "Failure Type", e a cascata Inside/Outside → Blade section
+→ Blade sub-section → Blade area) são um combobox custom do ServiceNow:
+
+1. Clica no campo pra abrir.
+2. Aparece uma caixa de busca + lista de opções (com "-- None --" como
+   primeiro item).
+3. Digita pra filtrar (essencial em listas longas, tipo "Sub Component" com
+   dezenas de itens "Accessoires - ...").
+4. Clica na opção exata da lista.
+
+`DamageEntryFiller.selectFromComboBox` (`snowAutomation.ts`) implementa esse
+padrão via `getByLabel` (abrir o campo) + `getByRole('textbox').last()`
+(caixa de busca, se aparecer) + `getByRole('option', { name, exact: true })`
+(clicar na opção). **Ainda não testado contra o DOM real** — se
+`getByRole('option', ...)` não achar nada, o widget provavelmente não expõe
+role ARIA; troca por `page.locator('li', { hasText: optionText })` ou
+`page.getByText(optionText, { exact: true })` como fallback. Rodar
+`npx playwright codegen <url>` clicando manualmente nos campos é o jeito
+mais rápido de confirmar/ajustar.
+
+## Blade serial number — usar o serial completo
+
+O combobox mostra o serial completo de 13 dígitos (ex.: `A1 811 0410 0115`),
+não o Blade SN curto (`410`) usado internamente. `readDamageRows` já lê a
+coluna A da planilha de saída do SNOW Processor, que já grava o
+`fullBladeSerial` (via `getBladeInfo(bladeSn).serial`, `bladeSets.ts`) — não
+precisa converter de novo aqui, só confirmar que a planilha usada tem esse
+campo preenchido (depende do `blade_sets.json` ter a pá cadastrada).
+
+## Cascata (Inside/Outside → Blade section → Blade sub-section → Blade area)
+
+Cada campo só popula de verdade depois do anterior ser escolhido (visto nos
+prints: aparecem como "-- None --"/"--None--" até o pai ser preenchido).
+Parece ser filtragem client-side (rápida, sem round-trip de rede visível),
+mas o código ainda espera o campo ficar visível/clicável antes de interagir
+(sem `waitForTimeout` fixo).
+
+## Fotos — nomenclatura sequencial obrigatória
+
+O formulário avisa explicitamente: *"In case of a picture sequence, please
+use numbers at attachment name begin (e.g.: 01_[Picture Name].jpg,
+02_[Picture Name].jpg, etc.)"*. `uploadPhotos` já baixa e nomeia os arquivos
+temporários como `01_...`, `02_...` etc. antes do upload — bate com a
+exigência do cliente de múltiplas fotos por achado.
+
+## Resiliência e Seletores com Fallback
+
+- **Dropdowns Customizados (Combobox)**: `DamageEntryFiller.selectFromComboBox` agora conta com seletores em cascata de fallback:
+  1. `getByRole('option', { name: optionText, exact: true })`
+  2. `getByRole('option', { name: optionText })`
+  3. `locator('li', { hasText: optionText })`
+  4. `locator('div', { hasText: optionText })`
+  5. `getByText(optionText, { exact: true })`
+- **Navegação "Add Damage Entry"**: Localiza de forma resiliente usando seletores para botões, links ou elementos de texto (`/add damage entry|nova entrada|criar dano/i`).
+- **Pós-Save**: Aguarda estado `networkidle` e confirmação antes de seguir para a próxima linha do lote.
+- **Isolamento de Erros**: Cada linha do Excel roda em bloco isolado de `try/catch` — se um defeito falhar, o erro é registrado no log e o script segue para o próximo defeito sem parar o lote.
+- **Faixa de Linhas**: É possível delimitar o intervalo de linhas a processar na UI (ex.: linhas 5 a 12) para retomar automações pausadas ou reprocessar falhas.
+
+## Status da Implementação (v1.5.4)
+
+- ✅ Módulo 24 (`SnowAutomationModule.jsx`) integrado na UI e registrado no `ModuleForm.jsx`.
+- ✅ Backend em Playwright (`snowAutomation.ts`) com suporte a navegador persistente (`%APPDATA%/ArthwindSuite/snow_browser_profile`).
+- ✅ Handlers IPC registrados em `src/main/index.ts` e expostos via `src/preload/index.ts`.
+- ✅ Typecheck `node` e `web` passando com 0 erros.
+
+## Bug corrigido: auditoria ao vivo não filtrava nada
+
+`auditLiveDamageEntries` sempre rodou e logou corretamente ("X assinaturas
+já cadastradas" ou "nenhum defeito detectado"), mas o `Set` retornado nunca
+era capturado no call site (`await auditLiveDamageEntries(auditPage, log)`,
+sem atribuição) — ou seja, a leitura acontecia, mas o resultado nunca era
+usado pra pular linha nenhuma antes do processamento começar. Por isso
+sempre parecia "não achar nada cadastrado" e seguia da linha 1, mesmo
+quando a auditoria de fato encontrou entradas.
+
+**Corrigido** em `runSnowDamageAutomation`: o `auditSet` agora é capturado e
+usado via `rowAlreadyInLiveTable` pra filtrar `rows` **antes** do loop
+principal, com log de quantas linhas foram puladas por já estarem na
+tabela ao vivo. Esse filtro roda **além** do filtro por histórico local
+(`submittedStore`) — os dois convivem, cobrindo tanto o que essa mesma
+máquina já submeteu quanto o que já existe no ServiceNow por qualquer
+outro meio (manual, outra máquina, etc.).
+
+### Segundo bug (achado em teste real): falso-positivo por chave frouxa
+
+Primeira versão do fix leu 11 linhas como "já submetidas" numa tabela que
+só tinha 8 entradas reais — 3 falso-positivos. Causa: a chave solta
+`shortSn+DF` (sem seção/área) casava com **qualquer número presente no
+texto da linha da tabela** (sys_id, data, outra coluna), não só a coluna de
+DF de verdade — bastava a pá bater e algum número aleatório coincidir.
+
+**Corrigido**: `damageRowAuditKeys` e a construção do `auditSet` em
+`auditLiveDamageEntries` agora só geram/aceitam a chave QUALIFICADA
+(shortSn+seção+área+DF) — a chave solta foi removida dos dois lados.
+Trade-off aceito de propósito: uma linha da planilha cuja área não apareça
+no texto da linha da tabela simplesmente não é confirmável e não é pulada
+(fica sujeita a ser processada de novo) — prefere isso a arriscar pular um
+defeito real por engano, já que pular por engano é silencioso (o defeito
+nunca é submetido e ninguém percebe) enquanto processar de novo é visível
+e recuperável (fica um registro duplicado, perceptível na conferência).
+
+### Terceiro bug (achado em teste real): navegação especulativa quebrava a página
+
+`auditLiveDamageEntries` tinha uma segunda tentativa de navegação: se não
+achasse um link clicável "Damage Report Entries" pra clicar, **adivinhava**
+uma URL de lista (`/bam?id=u_damage_report_entry_list&sysparm_query=u_damage_report=<sys_id>`)
+e navegava direto pra ela. Essa URL não existe nessa instância do
+ServiceNow — a navegação caía numa tela real de erro/acesso negado
+("Sorry, you are not allowed to access this page"), e toda a automação
+seguia operando a partir dessa página quebrada.
+
+**Corrigido (parcial)**: removida a navegação especulativa por URL
+adivinhada, com salvaguarda pra voltar à URL original se cair numa tela de
+erro por qualquer outro motivo. **Correção da suposição do "não precisa
+navegar pra lugar nenhum" no item abaixo** — essa parte estava errada.
+
+### Quarto bug (achado com print real da tela): a tabela NÃO fica na mesma página
+
+O fix anterior assumiu que "Damage Report Entries" ficava embutida na
+própria página do Inspection Report. **Errado** — é um link dentro da
+seção "Related Lists" (no fim do formulário, com um badge de contagem ao
+lado, ex.: "Damage Report Entries [8]") que abre uma **tela de lista
+separada**, com URL própria gerada pelo próprio ServiceNow ao navegar (não
+uma URL adivinhada por nós). Essa tela de lista tem colunas com nome real
+("Blade serial number", "DF distance - Start (m)", "Sub Component", etc.),
+bem diferente da estrutura solta que o código tentava adivinhar antes.
+
+**Corrigido**:
+- `navigateToDamageEntriesList`: clica no link "Damage Report Entries" de
+  verdade (`getByText(/damage report entries/i)`, sem âncora `^...$` —
+  a versão anterior usava âncora estrita, que provavelmente não batia com
+  o texto real do link, contendo o badge de contagem colado ou espaço
+  extra). Rola a página até o fim primeiro caso o link não apareça de
+  cara (a seção Related Lists é lazy/fica fora da viewport inicial).
+- `scanDamageEntriesTableByColumn`: em vez de escanear o texto inteiro da
+  linha atrás de qualquer número (a fonte do falso-positivo do bug
+  anterior), lê o cabeçalho da tabela pra achar o ÍNDICE das colunas
+  "Blade serial number" e "DF distance" e extrai o valor exato de cada uma
+  por célula — muito mais preciso, e permite voltar a usar a chave simples
+  `shortSn+DF` (sem precisar de seção/área) com segurança, já que o DF
+  agora vem garantidamente da coluna certa.
+- Depois de auditar, `auditLiveDamageEntries` **volta pra URL original**
+  do incidente — o resto da automação (clicar em "Add Damage Entry") espera
+  estar na página do relatório, não na tela de lista aberta pra auditoria.
+
+`auditLiveDamageEntries` também passou a distinguir e logar 3 cenários
+diferentes (antes só existiam 2 mensagens, ambíguas):
+1. Tabela encontrada com entradas → segue com o filtro normalmente.
+2. Tabela encontrada e genuinamente vazia → log neutro, sem alarme.
+3. **Tabela NÃO encontrada** (não conseguiu navegar até a lista, ou as
+   colunas têm nome diferente do esperado) → log de aviso explícito,
+   deixando claro que o filtro ao vivo não pôde ser aplicado (só o
+   histórico local vale nesse caso) — antes essa situação gerava a mesma
+   mensagem do cenário 2, escondendo o problema real.
+
+## Paginação: a lista pode ter mais de 20 defeitos
+
+A tela "Damage Report Entries" pagina em blocos de ~20 linhas (indicador
+"Rows X - Y of Z" + setas `<`/`>`). A primeira versão de
+`scanDamageEntriesTableByColumn` só lia a página inicial — turbinas com mais
+de 20 defeitos cadastrados perdiam silenciosamente as entradas das páginas
+seguintes, e o filtro ao vivo achava menos linhas do que realmente existiam.
+
+**Corrigido**: a leitura foi separada em três funções —
+- `scanCurrentListPage`: lê só a página atual (mesma lógica por índice de
+  coluna de antes), acumulando no `Set` compartilhado.
+- `goToNextListPage`: tenta uma cascata de seletores comuns pra botão/link
+  de "próxima página" (`aria-label="Next"`, ícone `›`/`>`, classes
+  `.pagination-next`/`.icon-next`), verificando se está desabilitado antes
+  de clicar (fim da paginação).
+- `scanDamageEntriesTableByColumn`: loop de até 50 páginas chamando as duas
+  acima em sequência, logando o progresso por página (`+N entrada(s), total
+  acumulado M`).
+
+## `skipSubmitted` deixou de ser uma opção configurável
+
+Existia um checkbox na UI (Módulo 24) pra ligar/desligar o filtro de "pular
+linhas já submetidas" (histórico local + auditoria ao vivo). Isso foi um
+erro de design: não existe cenário legítimo pra reprocessar uma linha já
+cadastrada de propósito — o único efeito de desligar seria criar duplicata
+no ServiceNow. O toggle nunca deveria ter sido uma opção do usuário.
+
+**Corrigido**: `skipSubmitted` foi removido de `RunAutomationOptions`, do
+checkbox da UI e das duas condicionais em `runSnowDamageAutomation` — os
+dois filtros (histórico local via `submittedStore` e auditoria ao vivo via
+`auditSet`) agora rodam **sempre**, de forma incondicional. O espaço do
+checkbox na UI virou um texto informativo explicando o comportamento.
+
+## Bug corrigido: upload de vídeo passava pra próxima linha sem submeter
+
+`uploadPhotos` esperava um tempo FIXO de 1.5s depois de anexar cada arquivo,
+antes de seguir pro próximo campo/submit. Isso é suficiente pra uma foto
+JPEG, mas o vídeo das linhas DF 45-50 é muito maior — o upload de verdade
+ainda estava em andamento quando o robô (no modo Submissão Automática) já
+clicava em Submit, resultando em entradas submetidas sem o vídeo anexado
+(ou o clique de Submit interrompendo o upload).
+
+**Corrigido**: arquivos de vídeo (`.mp4`/`.mov`/`.avi`/`.mkv`, detectado por
+`isVideoFile`) agora passam por
+`DamageEntryFiller.waitForAttachmentUploaded`, que fica checando a cada 1s
+se o nome do arquivo já apareceu na lista de anexos do formulário (sinal de
+upload concluído), com timeout de até 3 minutos e log periódico a cada 15s
+pra não parecer travado. Fotos continuam com o `waitForTimeout(1500)` de
+sempre (não é o gargalo, upload de foto é rápido).
+
+**Tentativa descartada**: a primeira versão desse fix fazia o vídeo subir
+numa aba dedicada em SEGUNDO PLANO (upload + submit assíncrono, sem
+bloquear o loop principal, seguindo pra próxima linha na aba compartilhada
+enquanto o vídeo anterior ainda subia). Funcionalmente resolvia o mesmo
+problema, mas o próprio usuário preferiu abrir mão do ganho de velocidade
+em favor de estabilidade — a automação roda muito overnight, sem ninguém
+por perto pra notar se algo trava com múltiplas abas simultâneas brigando
+pelo mesmo contexto/sessão do navegador. **Revertido para sequencial**: o
+upload de vídeo agora bloqueia normalmente (como qualquer outro campo),
+só que com a espera correta do item acima em vez do tempo fixo — mais
+lento por vídeo, mas sem o risco extra de duas abas ativas ao mesmo tempo.
+
+## Bug corrigido: precisava clicar em "Abrir p/ Login" antes de rodar
+
+Pra rodar "tranquilo", era preciso primeiro clicar em "🔑 Abrir p/ Login"
+(abre a janela, navega até o incidente) e só DEPOIS clicar em rodar a
+automação — sem esse passo manual, a automação podia navegar direto numa
+tela de login/SSO (sessão expirada, ou primeiro uso) e seguir tentando
+auditar/preencher um formulário que não existe ali, falhando de forma
+confusa mais na frente (ex.: "A tela 'Create Damage Entry' não carregou a
+tempo"). Não é um problema grave rodando uma turbina só com alguém por
+perto, mas quebra a fila overnight — não tem ninguém pra notar a tela de
+login travada às 3h da manhã.
+
+**Corrigido**: `ensureAuthenticatedPage` (chamada logo no início de
+`runSnowDamageAutomation`, antes até da auditoria ao vivo) navega até o
+incidente e checa se a página é uma tela de login (campo de senha visível,
+URL com padrão de login/SSO, ou texto típico de autenticação via
+`isLoginPage`):
+- Se a sessão já está logada (caso normal — inclusive entre turbinas
+  diferentes da fila, que reusam a mesma sessão persistente): segue direto,
+  sem qualquer espera extra.
+- Se cair numa tela de login E o modo headless estiver DESLIGADO: traz a
+  janela do navegador pra frente, loga um aviso claro, e fica esperando
+  (checando a cada 3s) por até 5 minutos que o login seja concluído
+  manualmente — dá tempo de alguém notar e agir, sem travar a automação
+  pra sempre. Se não logar a tempo, aborta só ESSA turbina com um erro
+  claro (`Sessão do ServiceNow não autenticada`) — na fila, isso não impede
+  as próximas turbinas de tentar (cada uma faz sua própria checagem).
+- Se cair numa tela de login E o modo headless estiver LIGADO: não tem como
+  pedir login interativo sem janela visível — loga o aviso e desiste
+  rápido, orientando a rodar uma vez sem headless pra logar manualmente.
+
+O botão "🔑 Abrir p/ Login" continua existindo (útil pra confirmar
+visualmente que a sessão está ok antes de uma fila longa), mas deixou de
+ser um passo obrigatório antes de rodar.
+
+### Bug corrigido (achado em teste real): falso-positivo — achava que não estava logado com a sessão 100% válida
+
+A primeira versão de `isLoginPage` bastava achar um campo `input[type=password]`
+"visível" em qualquer frame da página pra considerar tela de login. Em teste
+real, isso disparou com o Inspection Report **totalmente carregado e
+autenticado** (usuário "Rodolfo Meleiro" aparecendo no canto, formulário
+inteiro renderizado) — o robô ficou esperando 5 minutos por um login que já
+tinha acontecido.
+
+Causa: o ServiceNow mantém um widget de reautenticação escondido no DOM
+(`opacity: 0`, fora da viewport) pronto pra aparecer só quando a sessão
+*realmente* expira — mesmo em páginas já logadas. O `isVisible()` do
+Playwright não checa `opacity`, só `display`/`visibility`/tamanho da
+bounding box, então esse campo de senha fantasma passava no teste de
+"visível" sem nunca aparecer de verdade na tela.
+
+**Corrigido**: `isLoginPage` agora exige DOIS sinais concordantes — campo
+de senha visível **E** algum indício também visível de "Sign in"/"Log
+in"/"Entrar" (botão ou texto) — antes de considerar que é mesmo uma tela
+de login. Um campo de senha escondido sozinho não aciona mais o aviso.
+
+## Fila overnight (várias turbinas em sequência)
+
+Pra deixar rodando a noite inteira sem precisar ficar trocando de
+turbina manualmente: a UI (`SnowAutomationModule.jsx`) agora tem uma fila.
+
+- **"➕ Adicionar à Fila"**: pega os valores atuais do formulário (planilha,
+  pasta de fotos, URL do incidente, pás selecionadas, e todas as opções —
+  headless/autoSubmit/includeBlankImages/processOnlyVideos/faixa de linhas)
+  e guarda como um item da fila (snapshot — mudar as opções depois não
+  afeta itens já adicionados). Em seguida limpa o formulário
+  (`resetTurbineForm`) pra configurar a próxima turbina.
+- **"🌙 Rodar Fila Overnight (N)"**: dispara `handleRunQueue`, que roda os
+  itens em SEQUÊNCIA — chama `snow_automation_run` pra cada um e só começa
+  o próximo depois que o anterior retornar. Isso é proposital, não uma
+  limitação: são todos a mesma sessão/perfil de navegador persistente
+  (`%APPDATA%/ArthwindSuite/snow_browser_profile`), então rodar duas ao
+  mesmo tempo bateria de frente com o lock do próprio Chromium nesse
+  diretório (ver seção de instâncias simultâneas, se existir na
+  documentação geral do app).
+- **Falha numa turbina não para a fila**: cada iteração tem seu próprio
+  try/catch — se uma turbina falhar (erro de rede, sessão expirada, etc.),
+  o erro fica registrado no log e no status do item (✗), e a fila segue
+  pra próxima. Isso é o que faz sentido pra um run overnight sem ninguém
+  pra intervir; parar a fila inteira por causa de uma turbina travaria
+  todas as outras até alguém notar de manhã.
+- Cada item mostra status (⏳ pendente / ▶ rodando / ✓ concluído com
+  contagem ok/falha / ✗ falhou com o erro) e pode ser removido da fila
+  enquanto não está rodando.
+- O botão "▶ Rodar Agora" continua existindo pra rodar só a turbina atual
+  do formulário sem passar pela fila (uso pontual/teste rápido).
+
+## Desambiguação de vídeo por nome do anexo (mais precisa que contagem)
+
+Depois de trocar o painel de detalhe por validação de contagem (seção
+abaixo), o usuário mandou um print de uma entrada de vídeo real
+confirmando a causa raiz do painel nunca funcionar: os campos de uma
+entrada JÁ CADASTRADA (Blade section, Sub Component etc.) aparecem como
+texto travado/não-interativo — sem a mesma marcação de label do
+formulário de criação. Ele também notou que o **nome do anexo** (ex.:
+"B0545_S2_PS_DF45_DF50.mp4", visível no topo do painel) continua sendo um
+link de texto normal, e já tem a Section+Area codificadas no próprio
+nome (padrão do Módulo 23).
+
+**Implementado**: em vez de só contar quantos vídeos existem por pá,
+`readRowAttachmentFilename` clica em cada linha do grupo ambíguo e lê o
+nome do anexo, `parseVideoAttachmentQuadrant` extrai Section+Area do
+nome via regex (`_S(\d+)_([A-Za-z]{2})_DF`), e a chave qualificada
+correspondente é adicionada ao `auditSet` — desambiguação de verdade,
+sabe exatamente qual dos 4 quadrantes já existe, não só a contagem.
+
+Detalhe importante: a confirmação de que o painel já atualizou pra linha
+certa (antes só usava a DF Start) agora usa o **Número da entrada** (ex.:
+"DAM1117031", lido de uma nova coluna "Number" identificada na lista) —
+a DF não serve mais pra isso nesse caso específico, porque é IGUAL pras 4
+linhas do mesmo grupo de vídeo (diferente de quando distinguia entre
+linhas de DF diferentes).
+
+Se a leitura do anexo falhar pra alguma linha específica, ela não é
+marcada como já cadastrada (mesma filosofia de sempre — prefere reabrir
+uma aba já feita a pular um vídeo real que falta). Teto de 24 leituras de
+anexo por página, como salvaguarda.
+
+## Categorias independentes (Defeitos/Blanks/Vídeos) + rodadas de retentativa automática
+
+Duas mudanças de arquitetura pedidas pelo usuário, relacionadas entre si:
+
+**1. Categorias independentes.** O antigo checkbox único "Apenas Vídeos"
+virou 3 checkboxes independentes — Defeitos, Blank Images, Vídeos — todos
+marcados por padrão. `RunAutomationOptions.processOnlyVideos` foi
+substituído por `includeDefects`/`includeBlanks`/`includeVideos`
+(default `true` cada). O filtro por categoria acontece bem no início,
+antes até da auditoria — e desmarcar "Vídeos" faz a auditoria nem tentar
+ler nome de anexo (a parte mais lenta, clica em cada linha ambígua e
+espera o painel de detalhe) via um novo parâmetro `skipVideoAudit`
+passado por `auditLiveDamageEntries` → `scanDamageEntriesTableByColumn` →
+`scanCurrentListPage`. Motivo do pedido: quando o usuário só tem dúvida
+sobre uma categoria (ex.: "sei que vídeo e blank estão OK, só não tenho
+certeza dos defeitos"), não faz sentido pagar o custo da auditoria de
+vídeo pra nada.
+
+**2. Rodadas de retentativa automática (até 3).** A fase 1+2
+(Defeitos+Blanks) agora roda em rodadas: linhas que falharem (timeout,
+dropdown travado do SNOW, etc.) na rodada 1 são automaticamente
+retentadas na rodada 2, e assim por diante, até `MAX_ROUNDS = 3` ou até
+uma rodada não conseguir reduzir nada (sinal de problema persistente,
+não vale insistir mais). Só conta como falha DEFINITIVA (incrementa
+`failed`, entra em `errors`) depois de esgotar as rodadas — evita contar
+a mesma linha como "falha" várias vezes. Motivo do pedido: antes, se
+algumas linhas falhassem na primeira passada, o usuário precisava rodar
+a automação inteira de novo manualmente só pra pegar o que sobrou; agora
+isso acontece sozinho, sem sair da fase 1+2 (vídeo continua rodando só
+depois, mesmo com retentativas de defeito/blank rolando antes).
+
+**Fila overnight + vídeo manual — esclarecimento**: cada turbina da fila
+roda o ciclo completo (defeitos+blanks com retentativa → vídeos) e só
+passa pra próxima quando `runSnowDamageAutomation` RETORNA — isso
+acontece assim que os vídeos são preenchidos e as abas ficam abertas,
+**sem esperar revisão manual**. Numa fila com várias turbinas rodando a
+noite toda, as abas de vídeo de TODAS as turbinas se acumulam abertas ao
+longo da noite — de manhã, a revisão é de todas de uma vez, não turbina
+por turbina.
+
+## Bug corrigido: chave de auditoria usando DF End colidia com outro defeito real
+
+Achado numa reconciliação manual (VSR-07-02, PDF x planilha): um defeito
+real (pá 0566, Shell, Delamination, DF 48.1-48.4) que estava genuinamente
+FALTANDO no ServiceNow não aparecia como pendente na auditoria — o robô
+achava que já tinha sido cadastrado.
+
+Causa: `damageRowAuditKeys` gerava, além da chave com DF Start, uma
+SEGUNDA chave alternativa usando a DF End da linha — ideia original era
+deixar a comparação mais tolerante. Só que existe OUTRO defeito real,
+diferente, já cadastrado no ServiceNow, na MESMA pá, mesmo Sub Component,
+mesmo Failure Type "Delamination", começando EXATAMENTE em DF 48.4 (onde
+o primeiro termina). A chave do defeito faltante baseada na sua DF End
+(48.4) batia com a chave do outro defeito real baseada na DF Start dele
+(também 48.4) — falso-positivo. DF ranges que terminam onde outro começa
+são um padrão comum em dano real (blade sendo documentada em segmentos
+contínuos), não uma coincidência rara — então essa "tolerância" criava
+mais problema do que resolvia.
+
+**Corrigido**: `damageRowAuditKeys` usa só DF Start em todos os níveis de
+qualificação — é o único valor que a tabela ao vivo do ServiceNow
+realmente mostra (coluna "DF distance - Start (m)"), então é o único
+comparável de forma confiável. Chave baseada em DF End removida por
+completo.
+
+## Bug corrigido: Blank Image subia a mesma foto duas vezes
+
+`uploadPhotos` tratava Blank Image como qualquer defeito normal — pic1 +
+pic2, duas fotos. Usuário apontou que não faz sentido: Blank Image é só
+1 imagem, não um par.
+
+**Corrigido**: agora sobe só 1 cópia da imagem Blank Image por linha.
+
+## Bug corrigido: coluna "SNOW Entry #" gravava o IR do aerogerador em vez do DAM do defeito
+
+Usuário reparou: a coluna "SNOW Entry #" estava sendo preenchida com o
+mesmo valor (o IR do Inspection Report, ex.: "IR0066548") repetido em
+várias linhas — errado, esse valor é do AEROGERADOR inteiro, não de um
+defeito individual. O DAM de cada defeito (ex.: "DAM1117026") só é
+gerado depois de submeter, e só aparece de verdade na tela "Damage
+Report Entries".
+
+Causa: `readSubmittedEntryNumber` usava `getByLabel('Number', {exact:
+true}).first()` — mas o formulário tem MAIS de um campo/referência que
+pode responder a um rótulo "Number" (o "Inspection Report" também é uma
+referência tipo "IR0066548"). `.first()` nem sempre pegava o campo
+certo.
+
+**Corrigido**: em vez de confiar no primeiro candidato, varre TODOS os
+elementos que batem com o rótulo "Number" e só aceita um valor que tenha
+o formato de verdade de uma entrada de dano (regex `^DAM\d+$`) —
+rejeita qualquer outro formato (IR..., INC..., TASK...) mesmo que
+compartilhe o rótulo.
+
+**Atenção**: linhas já gravadas ERRADAS na planilha (com o IR em vez do
+DAM) continuam funcionando pro propósito de "não reprocessar" (a coluna
+só precisa estar não-vazia pra isso), mas ficam com um valor cosmético
+incorreto — se quiser o histórico visualmente correto, vale limpar essas
+células manualmente ou verificar contra a tabela ao vivo do ServiceNow.
+
+## Aba travada por bug do SNOW (dropdown "--None--") descartada automaticamente
+
+Bug reportado pelo usuário, do LADO DO SERVICENOW (não da automação): quando
+duas pessoas cadastram defeitos ao mesmo tempo, os dropdowns do formulário
+às vezes travam mostrando só "--None--" pra sempre naquela aba específica
+— um comportamento conhecido da plataforma, não algo que "destrava"
+tentando de novo na mesma aba (por isso a retentativa que já existe em
+`selectFromComboBox` não resolve: o problema não é o seletor, é a aba em
+si). Em modo manual isso incomoda pouco (o usuário vê e recarrega). Em
+modo Submissão Automática, como a aba é REAPROVEITADA entre linhas, sem
+nenhuma ação a próxima linha herdaria a mesma aba travada e falharia de
+novo, indefinidamente, até alguém notar manualmente.
+
+**Implementado (sugestão do usuário)**: quando uma linha falha (em modo
+autoSubmit), a aba do formulário é FECHADA antes de seguir pra próxima
+linha. Como o código já verifica `context.pages().find(p =>
+!p.isClosed())` no início de cada linha pra decidir se reaproveita uma
+aba existente ou abre uma nova, fechar a aba travada faz a checagem não
+achar nada aberto — a próxima linha abre uma aba nova do zero,
+"resetando" o problema sem precisar de nenhuma lógica especial de
+detecção do bug em si (não importa a causa exata da falha, qualquer erro
+em modo automático descarta a aba por segurança). A linha que falhou
+continua contabilizada como falha no resultado final — só não trava as
+próximas.
+
+**Cuidado apontado pelo usuário**: se a aba travada for a ÚNICA aba
+aberta no contexto (cenário comum — modo automático reaproveita só uma
+aba mesmo), fechar ela DIRETO corria o risco de derrubar a janela do
+navegador inteira antes da próxima linha ter chance de abrir uma nova
+(depende de como Windows/Chromium tratam fechar a última aba de uma
+janela). Corrigido invertendo a ordem: abre uma aba nova EM BRANCO
+primeiro (`context.newPage()`), e só DEPOIS fecha a travada — nunca fica
+com zero abas abertas em nenhum momento.
+
+## Bug corrigido: vídeo com só 1 entrada (não ambíguo) marcava os 4 quadrantes como prontos
+
+Teste real: pá 545 tinha 4 vídeos cadastrados e foi auditada certinho
+(lendo os 4 anexos, um por um). Mas pás 542 e 544 nem apareceram no log
+de auditoria de vídeo — o robô simplesmente não tentou ler nada pra elas,
+e todos os 12 vídeos (incluindo os de 542/544, que tinham só 1-2 vídeos
+cadastrados) acabaram marcados como "já cadastrados" sem nenhuma leitura
+de anexo.
+
+Causa: a leitura de anexo só rodava dentro do bloco de GRUPOS AMBÍGUOS
+(`group.length > 1`, ou seja, 2+ linhas com a mesma pá+DF45 na página).
+Se uma pá tinha só 1 vídeo cadastrado naquele momento, essa linha caía no
+caminho "não é ambíguo, é único" — que simplesmente adicionava a chave
+SEM qualificação de Section/Area ao `auditSet`. Como essa chave solta é
+uma das opções de match que `damageRowAuditKeys` gera pro lado da
+planilha, isso batia com TODOS OS 4 vídeos daquela pá na planilha — o
+robô achava que os 4 quadrantes já existiam só porque 1 existia, e nem
+chegava a tentar ler o anexo pra descobrir os outros 3 que faltavam.
+
+**Corrigido**: todo grupo de vídeo (DF Start = 45) — tenha 1, 2, 3 ou 4+
+linhas — sempre lê o anexo de cada linha pra pegar a chave qualificada
+exata (Section+Area). Só marca no `auditSet` o quadrante que realmente
+foi confirmado por leitura — nunca mais usa a chave solta pra vídeo, nem
+no caso "único". Isso é o que faz uma pá com só 1-2 vídeos cadastrados
+continuar sendo auditada linha por linha em vez de ser ignorada de vez.
+
+## Módulo 23: "Air Inclusion"/"Foreign Object" corrigidos pro plural real do SNOW
+
+Achado investigando por que o robô nunca reconhecia um defeito "Air
+Inclusion" já duplicado no ServiceNow: a chave da auditoria nunca batia
+por causa de uma diferença de "s" — a planilha (gerada pelo Módulo 23)
+grava "Air Inclusion" (singular), mas o dropdown REAL do SNOW usa "Air
+inclusions" (plural). Padrão idêntico já tinha causado confusão antes com
+"Foreign Object" (planilha, singular) x "Foreign objects" (SNOW, plural),
+na investigação da VSR-06-01.
+
+**Corrigido na fonte** (`SnowMappings.FAILURE_TYPES` em `snowProcessor.ts`
+— o "de-para" do Módulo 23): `'Bubbles': 'Air Inclusion'` →
+`'Bubbles': 'Air inclusions'`, e `'Foreign Object': 'Foreign Object'` →
+`'Foreign Object': 'Foreign objects'`. Dados gerados pelo Módulo 23 DAQUI
+PRA FRENTE já saem com o termo certo — inclusive faz a seleção do
+combobox "Failure Type" no Módulo 24 bater por igualdade de verdade, em
+vez de só um match por substring com sorte (já que "Air Inclusion" é
+prefixo de "Air inclusions", o `hasText` antigo "funcionava" por
+coincidência, mas a comparação exata da auditoria não).
+
+A tolerância plural/singular na auditoria (próxima seção) continua
+valendo — cobre dados JÁ CADASTRADOS antes dessa correção, com o termo
+singular antigo.
+
+## Auditoria: Failure Type comparado com tolerância plural/singular
+
+Mesmo depois de corrigir a fonte no Módulo 23 (seção acima), dados JÁ
+CADASTRADOS antes da correção continuam com o termo singular antigo
+("Air Inclusion", "Foreign Object") gravado no ServiceNow — a auditoria
+precisa reconhecer esses casos antigos também, não só os novos.
+
+**Corrigido**: nova função `normalizeFailureType` (variante de
+`normalizeSubComponent` que também remove um "s" final) usada
+especificamente pra normalizar o Failure Type — nos dois lados
+(`scanCurrentListPage`, lendo a tabela ao vivo, e `damageRowAuditKeys`,
+lendo a planilha). "Air Inclusion" e "Air inclusions" caem no mesmo
+`air inclusion` normalizado, batendo independente de qual lado tem o "s".
+Aplicado só ao Failure Type — Sub Component/Section/Area continuam sem
+essa tolerância (não há evidência do mesmo problema ali, e siglas curtas
+como "SS"/"PS" arriscariam colisão indevida com um strip de "s" genérico).
+
+## Bug corrigido (2ª tentativa): checagem de "painel atualizou" ainda não achava o valor certo
+
+A correção anterior (usar `getByLabel('Number', {exact:true})` em vez de
+`getByText` solto) resolveu o falso-positivo, mas criou um novo problema:
+o campo "Number" nessa tela (uma entrada JÁ CADASTRADA) não tem a mesma
+associação `<label for="...">` do formulário de criação — confirmado no
+log de diagnóstico, que mostrou literalmente `campo Number mostra agora
+"Number"` (o texto do RÓTULO, não o valor "DAM1117027"). `getByLabel`
+não achava o campo de verdade, só o texto do rótulo, e a leitura nunca
+batia com o número esperado — timeout sempre.
+
+**Corrigido (3ª abordagem)**: em vez de procurar por rótulo/label, busca
+o NÚMERO em si (`getByText(expectedDamNumber)`) em qualquer lugar da
+tela, mas filtra fora qualquer ocorrência que esteja dentro de uma
+`<table>` — a lista é uma tabela, o painel de detalhe não é. Isso separa
+a ocorrência do número na LISTA (que causou o primeiro bug) da ocorrência
+no PAINEL (que é o que realmente queremos), sem depender de nenhuma
+marcação de acessibilidade/formulário — só da estrutura DOM (dentro ou
+fora de tabela).
+
+## Painel de detalhe abandonado — trocado por validação de contagem (HISTÓRICO — superado pela leitura de anexo acima)
+
+O usuário achou um bug sério na versão anterior: um defeito NÃO-vídeo já
+duplicado no ServiceNow (Air Inclusion, pá 0542, DF 49.5 — o mesmo
+duplicado achado na reconciliação da VSR-06-03) continuava sendo
+reprocessado pelo robô, mesmo já tendo 2 cópias lá. Print de uma entrada
+de vídeo real (DAM1117026) confirmou que os campos "Blade section" /
+"Blade sub-section" / "Blade area" existem no formulário com rótulos
+normais — mas mesmo assim `readRowDetailPanel` continuava falhando 100%
+das vezes em teste real, apesar do fallback de texto.
+
+Causa do bug do duplicado: a lógica de agrupamento por assinatura
+(pá+Sub Component+Failure Type+DF) tratava QUALQUER colisão do mesmo
+jeito — tanto os 4 vídeos legítimos de uma pá quanto uma duplicata real —
+tentando abrir o painel de detalhe pros dois casos. Como a leitura do
+painel falha, e a correção anterior fazia "não confirmar nada" quando
+falha (pra não arriscar pular vídeo real), isso também deixava
+duplicatas REAIS sem proteção nenhuma.
+
+**Corrigido — abandonado o painel de detalhe de vez, trocado por
+validação de contagem** (sugestão do usuário: "os vídeos tinha que ao
+menos ter a validação de que são 4 por blade"):
+
+- **Grupo com DF Start = 45 (vídeo)**: conta quantas linhas existem no
+  grupo. Se já são 4 ou mais (o total esperado de quadrantes por pá:
+  Section 1/2 × PS/SS), marca como completo — não precisa saber QUAL
+  quadrante é qual, só a contagem já garante que os 4 já existem. Se são
+  menos de 4, não marca nada — os 4 vídeos correspondentes da planilha
+  seguem pro processamento normal (pior caso: aba redundante pros que já
+  existem, nunca duplica de verdade, já que vídeo é sempre revisão
+  manual).
+- **Qualquer outra colisão (não-vídeo)**: colisão de pá+componente+falha+DF
+  fora do padrão de vídeo é, na prática, sempre uma duplicata real —
+  confirma direto como já cadastrada, sem precisar abrir nada.
+
+`readRowDetailPanel` e toda a lógica de clique+leitura do painel de
+detalhe foram removidas do arquivo (código morto, sem mais nenhuma
+chamada) — mais simples, mais rápido, e não depende de um seletor que
+nunca funcionou de forma confiável em teste real.
+
+## Desambiguação de grupo ambíguo: falha não cai mais na chave colapsada (HISTÓRICO — abandonada, ver correção acima)
+
+Teste real (turbina com vídeos): mesmo com o fallback de texto no
+`readRowDetailPanel` (seção acima), a leitura do painel continuou
+falhando pra alguns grupos ambíguos ("Não deu pra ler o painel de
+detalhe..."). O comportamento antigo, quando a leitura falhava, era cair
+de volta na chave colapsada (`auditSet.add(baseKey)`) — mas isso tem um
+efeito colateral perigoso: marca TODAS as linhas do grupo (ex.: os 4
+vídeos DF45 de uma pá) como "já cadastradas" só porque UMA bateu com essa
+assinatura fraca. Numa turbina real (VSR-06-03), isso quase causou vídeos
+genuinamente faltando serem pulados por engano.
+
+**Corrigido**: quando a desambiguação falha (seja por não conseguir ler o
+painel, seja por exceder `MAX_DETAIL_LOOKUPS`), o grupo simplesmente NÃO
+é adicionado ao `auditSet` — nem colapsado, nem qualificado. Consequência:
+todas as linhas da planilha correspondentes a esse grupo seguem pro
+processamento normal, sem serem filtradas como "já existentes". Pra
+defeitos normais isso significa reprocessar (visível, recuperável). Pra
+vídeo especificamente, o pior caso é abrir uma aba redundante pra revisar
+— como o Submit de vídeo é sempre manual, nunca vira duplicata de
+verdade. Mantém a mesma filosofia de sempre: prefere risco de duplicata
+visível a risco de pular um defeito real silenciosamente.
+
+## Zoom out removido — hipótese errada, causa raiz era outra
+
+O bug "18 de 26 defeitos" (seção abaixo) foi originalmente atribuído a uma
+grade virtualizada sem scroll funcional, e "corrigido" com um zoom out
+programático (`document.body.style.zoom`) + rolagem repetida
+(`growListUntilStable`). Só que, revisando depois, a causa raiz real era
+outra: **colisão de chave** (linhas diferentes com a mesma pá+DF
+colapsando numa assinatura só), já corrigida separadamente qualificando a
+chave por Sub Component + Failure Type. A paginação real (numerada, com
+setas "<"/">") sempre funcionou direito — não era necessário nenhum zoom
+out pra ler as linhas.
+
+**Removido**: `growListUntilStable` (função inteira) e as duas chamadas
+de `document.body.style.zoom` em `scanDamageEntriesTableByColumn`. Menos
+uma manipulação desnecessária da página durante a auditoria — o zoom out
+não tinha efeito real no problema que motivou ele, só era uma variável a
+mais que podia interferir em outra coisa (cliques, leitura de layout)
+sem necessidade.
+
+## Bug corrigido: lista sem barra de rolagem escondia parte dos defeitos da auditoria (hipótese HISTÓRICA — ver correção acima)
+
+Reportado pelo usuário: a tela "Damage Report Entries" não mostra barra de
+rolagem mesmo quando tem mais linhas do que cabe na tela — a única forma de
+ver tudo manualmente é dar zoom out no navegador. Isso batia com o sintoma
+observado na auditoria ao vivo: numa turbina com 26 defeitos cadastrados,
+só 18 eram detectados.
+
+Causa provável: a grade da lista é virtualizada (só monta no DOM as linhas
+dentro da área "visível" da tela) e o contêiner de scroll está com algum
+CSS quebrado (`overflow` errado, ou altura fixa menor que o conteúdo) — sem
+scroll funcional, as linhas fora da área inicialmente renderizada nunca
+chegam a existir no DOM, então `table tbody tr` simplesmente não as
+enxerga. Não é paginação de verdade (por isso o `goToNextListPage` não
+encontrava nada pra clicar e a leitura parava ali, silenciosamente).
+
+**Corrigido**: `growListUntilStable` (chamada antes de cada leitura de
+página em `scanDamageEntriesTableByColumn`) reproduz o mesmo efeito do
+zoom out manual — reduz o `zoom` do `body` da página via
+`document.body.style.zoom = '0.3'` antes de começar (mais conteúdo cabe na
+área "visível", então a grade virtualizada monta mais linhas de cara) — e
+complementa rolando repetidamente (`scrollIntoViewIfNeeded` na última
+linha + `window.scrollTo` até o fim) até o número de linhas no DOM parar
+de crescer, com log informando quantas linhas "apareceram" depois do
+scroll. O zoom é restaurado (`= '1'`) num `finally` ao fim da leitura de
+todas as páginas.
+
+## Bug corrigido (achado em teste real): chave só por DF colapsava defeitos diferentes na mesma distância
+
+Teste real numa turbina com 45 entradas cadastradas: a auditoria leu as 3
+páginas corretamente (16 + 20 + 4), mas só chegou a 40 assinaturas únicas
+— 5 "sumiram". Olhando a tabela ao vivo, dava pra ver o motivo: várias
+linhas com a MESMA pá e a MESMA "DF distance - Start (m)", mas Sub
+Component diferente (ex.: "Blade Inside - Shell" e "Blade Inside - Web
+laminate" ambos na DF 40.5). Como a chave da auditoria era só `pá+DF`
+(decisão tomada no "Quarto bug" acima, quando a leitura por coluna deixou
+de precisar da qualificação por seção/área pra evitar falso-positivo),
+essas linhas diferentes colapsavam numa única assinatura no `Set` — um
+defeito novo caindo na mesma DF de um componente diferente já cadastrado
+podia ser pulado por engano, achando que já tinha sido submetido.
+
+**Corrigido**: `scanCurrentListPage` agora também localiza a coluna "Sub
+Component" (existe nessa tela, junto com "Blade serial number" e "DF
+distance") e, quando encontrada, qualifica a chave como
+`pá_subComponentNormalizado_DF` em vez de só `pá_DF` — `normalizeSubComponent`
+trata diferenças bobas de formatação (maiúsculas, espaços, traço de
+prefixo). `damageRowAuditKeys` (lado da planilha) gera a mesma chave
+qualificada a partir de `row.subComponent`, MAIS a chave antiga sem
+qualificação como fallback — cobre o caso raro de a coluna Sub Component
+não ser encontrada na tabela (aí o `Set` só tem chaves não-qualificadas, e
+o fallback ainda bate). Não reintroduz o falso-positivo do "Segundo bug":
+aquele vinha de escanear texto solto atrás de qualquer número; aqui a
+coluna é lida por índice exato, então qualificar por ela não perde
+precisão.
+
+### Refinamento: Sub Component sozinho não bastava — faltava Failure Type
+
+Analisando a planilha real que gerou aquela tabela (`VSR-06-01_Novo_Excel.xlsx`),
+achei outro padrão de colisão que a qualificação por Sub Component (item
+acima) não cobre: linha 9 e linha 43 da planilha são a MESMA pá (0548), o
+MESMO Sub Component ("Blade Inside - Shell") e a MESMA "DF distance -
+Start (m)" (40.0) — mas Failure Type diferente ("Deviation Core Material"
+x "Delamination"). Como só Sub Component qualificava a chave, essas duas
+linhas ainda colapsavam numa assinatura só.
+
+**Corrigido**: `scanCurrentListPage` agora também localiza a coluna
+"Failure type" (existe na tela, confirmada nos prints reais) e monta a
+chave mais qualificada possível, em cascata — `pá_subComponent_failureType_DF`
+se achou as duas colunas, `pá_subComponent_DF` se só achou uma, ou
+`pá_DF` se não achou nenhuma. `damageRowAuditKeys` (lado da planilha) gera
+as três variantes e testa todas via `.some()`, cobrindo qualquer nível de
+qualificação que a tabela ao vivo conseguiu produzir.
+
+### Resolvido: desambiguação das 4 fotos/vídeos de DF 45-50 por pá via painel de detalhe
+
+As 4 entradas de vídeo por pá (Section 1/2 × PS/SS, todas DF 45-50) têm
+**Sub Component E Failure Type idênticos** ("Blade Inside - Shell" /
+"Type of Failure is Missing" pra todas as 4) — o único jeito de
+diferenciá-las é por "Blade section"/"Blade sub-section"/"Blade area" (qual
+quadrante da pá), que **não aparecem como coluna na tela de lista**
+"Damage Report Entries" (só no formulário/painel de detalhe da entrada).
+
+O usuário reparou que clicar numa linha da lista abre um painel de
+detalhe à direita (é uma view mestre/detalhe — a lista continua visível à
+esquerda) com TODOS os campos da entrada, incluindo Blade section/
+sub-section/area. Baseado nisso:
+
+**Implementado**: `scanCurrentListPage` agora agrupa as linhas por
+assinatura (pá+Sub Component+Failure Type+DF) ANTES de gravar no
+`auditSet`. Grupos com uma linha só vão direto pro `Set` (caminho rápido,
+a maioria das linhas). Grupos com mais de uma linha (ambíguos — ex.: os 4
+vídeos de uma pá) disparam `readRowDetailPanel`: clica na linha, espera o
+painel abrir, e lê Blade section/sub-section/area — a chave gravada no
+`Set` fica totalmente qualificada com esses 3 campos a mais.
+`damageRowAuditKeys` (lado da planilha) gera a variante equivalente a
+partir de `row.bladeSection`/`bladeSubSection`/`bladeArea`.
+
+**Cuidado importante (avisado pelo usuário em teste real)**: o painel de
+detalhe tem delay considerável pra abrir, e se já tinha um aberto de uma
+linha anterior, o painel novo demora ~3s pra aparecer POR CIMA do antigo —
+logo depois do clique, o painel ainda mostra dados da linha ANTERIOR por
+um tempo. Só checar "o painel está visível" não bastava (sempre estaria,
+é o painel velho). `readRowDetailPanel` recebe o valor de DF distance
+esperado (já lido da coluna da lista) e só aceita a leitura quando o "DF
+distance - Start (m)" MOSTRADO NO PAINEL bater com esse valor — confirma
+que o painel já atualizou pra linha certa antes de ler Section/Sub-section/
+Area, evitando ler dados velhos por engano. Timeout de até 15s por linha.
+
+Teto de segurança: no máximo 12 desambiguações por página (cada uma é
+lenta de propósito — só compensa pra grupos pequenos de verdade
+ambíguos). Se um grupo ultrapassar o teto, fica com a chave colapsada
+mesmo (mesmo trade-off de sempre: prefere risco de pular um defeito real
+a travar a auditoria inteira tentando desambiguar demais).
+
+## Blank Image auditada por CONTAGEM, não por linha
+
+`extractBladeSn('Blank Image')` retorna vazio (não tem 4 dígitos pra
+achar) — então essas linhas nunca entravam na leitura por pá+DF da tabela
+ao vivo nem na montagem de chave da planilha. Mas o problema é mais fundo
+que só isso: quando uma linha "Blank Image" É submetida de verdade,
+`readDamageRows` já reatribui o `bladeSerialNumber` pro último blade REAL
+válido da planilha (`lastValidBladeSerial`) — então na tabela do
+ServiceNow essa entrada aparece com uma pá de verdade, indistinguível de
+um defeito real daquela pá pelos campos visíveis. Auditar Blank Image por
+pá+DF nunca faria sentido, mesmo se `extractBladeSn` funcionasse pra ela.
+
+**Implementado**: em vez de tentar casar cada linha "Blank Image" da
+planilha com uma linha específica do ServiceNow, `scanCurrentListPage`
+CONTA quantas entradas já existem (reconhecidas pela "Damage Description"
+= "Empty entry", texto fixo que o Módulo grava só pra essas linhas) —
+independente de qual pá foi usada pra registrar. `runSnowDamageAutomation`
+usa essa contagem pra calcular quantas ainda faltam
+(`Math.max(0, 5 - blankImageCount)`) e mantém só essa quantidade das
+linhas "Blank Image" da planilha, descartando o excedente — preserva a
+exigência do cliente de exatamente 5 por turbina sem duplicar.
+
+## Fallback de texto pra leitura do painel de detalhe (getByLabel falhou 100% em teste real)
+
+Depois de implementar a desambiguação por painel de detalhe (seção
+anterior), um teste real mostrou `readRowDetailPanel` falhando em TODAS as
+tentativas (7 de 7, "Não deu pra ler o painel de detalhe") — mesmo pra
+grupos de linhas com pás/DFs bem diferentes entre si, o que descarta
+"são duplicatas genuínas" como única explicação (mesmo duplicatas de
+verdade deveriam permitir a LEITURA, só resultariam numa chave igual).
+Indício forte de que `getByLabel` simplesmente não encontra os campos
+"Blade section"/"Blade sub-section"/"Blade area" NESSA tela — o painel de
+detalhe provavelmente não usa a mesma associação `<label for="...">` que o
+formulário de edição usa (talvez só texto estático, sem marcação de
+acessibilidade formal).
+
+**Corrigido (sem confirmação visual do DOM real — testar e ajustar se
+ainda falhar)**: `readField` e a checagem de presença do painel agora têm
+um fallback baseado em texto — se `getByLabel` não achar nada, localiza o
+elemento que contém o TEXTO do rótulo (`getByText`), sobe pro container
+mais próximo (`xpath=ancestor::*[self::div or self::td or self::li][1]`)
+e lê o texto completo do container, removendo o próprio texto do rótulo
+pra sobrar só o valor. Mais frágil que uma leitura por label de verdade,
+mas não depende de marcação de acessibilidade específica.
+
+## Blank Image deixou de ser opcional
+
+`includeBlankImages` era um checkbox (padrão desligado) que decidia se as
+linhas "Blank Image" da planilha entravam no processamento. Segundo o
+usuário: isso está errado — toda inspeção, sem exceção, exige exatamente 5
+Blank Image, não é um comportamento facultativo (mesmo caso do
+`skipSubmitted`, que também deixou de ser toggle antes).
+
+**Corrigido**: removida a condicional em `readDamageRows` — as linhas
+"Blank Image" da planilha sempre entram no processamento agora. Removido
+o campo `includeBlankImages` de `RunAutomationOptions`, o checkbox da UI,
+e o state associado. A proteção contra duplicata continua sendo a
+auditoria por contagem (seção acima) — não precisa mais de opção pra
+"ativar" isso, sempre roda.
+
+Nota à parte: linhas de vídeo (DF 45-50) já eram incluídas por padrão em
+qualquer run normal — `processOnlyVideos` só FILTRA pra rodar só elas,
+nunca as excluiu quando desligado. Então, ao contrário de Blank Image,
+vídeo nunca teve esse problema de exclusão por padrão.
+
+## Vídeos processados em cascata, sempre em modo manual (fase separada)
+
+O robô esperava (bloqueando) o upload do vídeo terminar antes de seguir
+pra próxima linha — mesmo depois de trocar o `waitForTimeout` fixo por uma
+espera de verdade (ver bug corrigido acima), isso ainda desperdiçava muito
+tempo: o upload de um vídeo demora bem mais que preencher 3-4 formulários
+inteiros (que é praticamente instantâneo — é cópia/cola de dados). O
+usuário apontou o problema e propôs a solução: preencher o formulário,
+disparar o upload SEM esperar terminar, e já pular pra próxima aba — o
+tempo de preencher os próximos formulários naturalmente "cobre" o tempo de
+upload dos anteriores (cascata).
+
+O ponto crítico da proposta (e o que evita reintroduzir o bug de "clicou
+Submit antes do upload terminar" de uma tentativa anterior, já revertida):
+vídeo **nunca é auto-submetido**, nem em modo Submissão Automática. Sem
+precisar verificar "o upload terminou de verdade?" antes de decidir
+submeter — simplesmente nunca submete sozinho, sempre deixa a aba aberta
+pra revisão manual. Confiabilidade fica com o inspetor conferindo o
+Damage Report Entries antes de enviar, não com um log interno do robô.
+
+**Implementado**:
+- `runSnowDamageAutomation` agora processa em 3 fases, nessa ordem fixa:
+  1. Defeitos normais (sequencial, aba compartilhada, como sempre foi).
+  2. Blank Images (mesmo loop da fase 1 — só reordenadas pra vir depois
+     dos defeitos de verdade).
+  3. Vídeos (DF 45-50) — loop separado, cada vídeo abre sua PRÓPRIA aba
+     nova, preenche o formulário, dispara o upload e segue pro próximo
+     SEM esperar. `openDamageEntryForm` (função extraída do loop
+     principal — clicar "Add Damage Entry" + esperar o formulário ficar
+     pronto, com todas as retentativas de sempre) é reusada pelas duas
+     fases, evitando duplicar essa lógica.
+- `DamageEntryFiller.fill()` e `uploadPhotos()` ganharam um parâmetro
+  `waitForVideoUpload` (padrão `true`, mantém o comportamento de sempre
+  pras fases 1/2). A fase 3 chama `fill(row, localPhotos, false, false)`
+  — `autoSubmit=false` (nunca submete) + `waitForVideoUpload=false`
+  (dispara o upload e não bloqueia esperando terminar, só uma pausa
+  mínima de 800ms pra garantir que o clique/seleção do arquivo
+  realmente registrou antes de trocar de aba).
+- Vídeo não é gravado no histórico local (`snow_submitted_rows.json`) —
+  só é auto-submetido pelo humano, o robô nunca vê a confirmação final,
+  então não tem como marcar "esse foi submetido". A proteção contra
+  duplicata pra vídeo numa próxima rodada depende inteiramente da
+  auditoria ao vivo (por isso os ajustes de precisão dessa auditoria,
+  descritos acima, importam tanto pra vídeo especificamente).
+- `RunAutomationResult` ganhou `videosFilled`/`videosFailed`, contados à
+  parte de `processed`/`failed` — "preenchido, aguardando revisão manual"
+  não é a mesma coisa que "ok" ou "falhou".
+
+## Bug crítico corrigido: seleção de combobox podia "parecer" funcionar sem selecionar nada
+
+Conferindo manualmente o ServiceNow (comparando a tabela ao vivo com a
+planilha original), o usuário achou 3 entradas cadastradas na pá **0549**
+quando a planilha claramente dizia **0548** pra aquele defeito
+específico (Foreign Object, DF 36). Rodou de novo em modo Conferência
+Manual (sem autosubmissão, cada linha em aba nova — descartando resíduo
+de busca de uma aba compartilhada) e o mesmo erro se repetiu.
+
+Causa raiz: `selectFromComboBox` clicava numa opção candidata e
+considerava sucesso só por não ter dado exceção — nunca conferia se o
+clique realmente selecionou o valor CERTO. Se nenhum dos seletores em
+cascata batesse de verdade com o texto esperado (por qualquer motivo —
+timing, texto renderizado diferente do esperado, delay do Select2), o
+código só seguia em frente silenciosamente (`.catch(() => {})`),
+deixando o campo com o que já estivesse selecionado ali antes (aparenta
+ser algum valor lembrado pela sessão/cache do próprio ServiceNow) — e o
+resto do formulário continuava sendo preenchido normalmente, sem erro
+visível nenhum. Resultado: defeito cadastrado na pá errada, sem log de
+falha, só descoberto comparando manualmente com a planilha original.
+
+**Corrigido**: `selectFromComboBox` agora, depois de tentar selecionar,
+LÊ DE VOLTA o valor que ficou no campo (`readComboBoxValue`, novo método
+— lê o texto do container `.select2-chosen`/`.select2-choice` visível) e
+compara com o valor esperado (comparação tolerante, `includes` nos dois
+sentidos, pra aguentar truncamento de texto longo). Se não bater:
+1. Loga aviso claro e tenta a seleção inteira de novo, do zero.
+2. Se AINDA assim não bater depois da retentativa, lança uma exceção —
+   aborta essa linha específica com erro claro em vez de seguir
+   preenchendo o resto do formulário com dado errado.
+
+Essa verificação vale pra QUALQUER campo de combobox (Blade serial
+number, Sub Component, Failure Type, Inside/Outside, Blade section,
+sub-section, area, shear web) — todos passam pelo mesmo
+`selectFromComboBox`, então todos ganham a mesma proteção.
+
+## Verificação de combobox virou dupla leitura (não só uma)
+
+Achado real: mesmo com a verificação de leitura única (seção acima), um
+caso passou — "Blade serial number" foi lido como correto ("0544") no
+instante da checagem, mas o valor final que ficou no formulário (visto
+manualmente pelo usuário depois de uma falha em "Blade area" na mesma
+linha) era outra pá ("0542"). Ou seja: uma condição de corrida — o campo
+estava certo no momento da leitura e mudou depois (script client do
+ServiceNow, re-render do Select2, ou cascata de outro campo), sob carga
+(mesma categoria dos outros dois bugs de timing corrigidos hoje).
+
+**Corrigido**: `selectFromComboBox` agora lê o valor DUAS vezes, com
+600ms de intervalo, e só aceita se as duas leituras baterem entre si E
+com o valor esperado (`readStable`). Se a leitura mudar entre a primeira
+e a segunda (instável) ou não bater com o esperado, conta como falha —
+mesmo fluxo de retentativa + abortar linha de antes, só que agora também
+pega o caso de "parecia certo, mudou depois".
+
+## Bug corrigido (achado pela nova verificação de combobox): "Blade area" e "Blade shear web" são mutuamente exclusivos
+
+A verificação pós-seleção implementada antes (ver "Bug crítico corrigido")
+pegou um erro real na primeira vez que rodou: `[Blade area] Seleção não
+confirmada (queria "Shear Web A", ficou "(vazio)")`. Print real do
+formulário confirmou a causa — quando "Blade sub-section" é "Shear Web",
+o ServiceNow troca o campo "Blade area" pelo campo "Blade shear web" (não
+aparecem os dois juntos na tela; visualmente só existe "Blade shear web"
+nesse estado). O código sempre tentava preencher "Blade area" de qualquer
+jeito, mesmo quando o campo nem existia — antes da verificação existir,
+isso passava batido silenciosamente; com ela, corretamente vira erro
+(exatamente o comportamento que a verificação deveria ter).
+
+**Corrigido**: `fill()` só tenta selecionar "Blade area" quando "Blade
+shear web" NÃO está visível — nesse último caso, o valor já foi
+capturado no passo anterior (`selectFromComboBox('Blade shear web', ...)`
+usa `data.bladeArea` como valor, já que pra pás com Shear Web a área É o
+próprio nome do shear web, ex. "Shear Web A").
+
+## Ajuste: mais paciência ao abrir o formulário na fase de vídeos
+
+Usuário reportou: rodando só vídeos, ao pular pra próxima aba o robô às
+vezes retornava "não abriu a tempo" pro Add Damage Entry — pediu pra
+MANTER a validação (não removê-la), só dar tempo suficiente antes de
+desistir, e checar se o mesmo comportamento acontece fora da fase de
+vídeos também.
+
+Explicação provável: na fase de vídeos, abas anteriores podem estar
+subindo vídeo ao mesmo tempo (uso pesado de rede/CPU) — uma aba nova
+nessa hora demora mais que o normal pra carregar/renderizar, e o
+orçamento de tempo que `openDamageEntryForm` dava (~17s no total, somando
+todas as etapas) não bastava.
+
+**Ajustado (aplicado nas duas fases, não só vídeo — verificação genérica
+de "carga alta pode acontecer em qualquer hora")**:
+- Nova espera inicial: `waitForLoadState('networkidle', {timeout: 8000})`
+  antes de sair procurando o botão "Add Damage Entry" — dá chance da
+  página assentar primeiro.
+- Loop de clique: de 12 tentativas × 800ms pra 20 tentativas × 1000ms.
+- Espera pelo formulário ficar pronto (1ª rodada): de 5s pra 15s.
+- Espera pelo formulário ficar pronto (2ª rodada, depois de retentar o
+  clique): nova, adicionada — mais 8s de espera antes de desistir de vez
+  (antes só tinha um `waitForTimeout(2000)` fixo, sem re-checar depois).
+- Orçamento total foi de ~17s pra ~50s+ antes de considerar que o
+  formulário realmente não abriu.
+
+A validação em si (checar se realmente é a tela do formulário, não só
+"algo carregou") continua exatamente igual — só ficou mais paciente antes
+de desistir.
+
+## Histórico local em JSON removido — planilha virou a única fonte de verdade
+
+Reflexão do usuário sobre o Módulo 23: ter duas fontes de verdade
+independentes (o histórico local em JSON de um lado, a tabela ao vivo do
+ServiceNow de outro) tanto pode reforçar a robustez quanto pode
+atrapalhar — e foi exatamente isso que causou o bug de "histórico
+desatualizado" documentado na seção antiga logo abaixo. A saída: parar de
+manter um JSON GO à parte e passar a gravar o resultado direto na própria
+planilha.
+
+**Implementado**:
+- `OUTPUT_HEADERS` em `snowProcessor.ts` (Módulo 23) ganhou uma 17ª
+  coluna, **"SNOW Entry #"**, reservada em branco — o Módulo 23 não
+  escreve nada nela, só reserva a posição.
+- `DamageEntryFiller.fill()` (Módulo 24), depois de um Submit
+  bem-sucedido, lê o campo "Number" do formulário recém-criado (label
+  EXATA — `exact: true`, já que "Blade serial number" também contém a
+  palavra "number" como substring e bateria por engano com
+  `exact: false`) e devolve esse valor (ex.: "DAM1115650") pra quem
+  chamou.
+- `runSnowDamageAutomation` grava esse número na coluna 17 da linha
+  correspondente na planilha ORIGINAL (`writeBackEntryNumber`) e SALVA o
+  arquivo imediatamente — não em lote no final, pra não perder o
+  progresso se a automação for interrompida no meio de um lote grande.
+  Precisou de um novo campo `excelRowIndex` em `DamageReportRow` (o
+  número da linha na planilha, gravado por `readDamageRows`) pra saber
+  em qual linha escrever de volta.
+- `readDamageRows` agora checa a coluna 17: se já tem algo escrito, a
+  linha é ignorada de cara (nem entra no array de linhas a processar) —
+  substitui o antigo filtro por `snow_submitted_rows.json`.
+- Removidos: `loadSubmittedRows`, `markRowSubmitted`,
+  `clearSubmittedRowsStore`, `buildRowKey`, o handler IPC
+  `snow_automation_clear_history`, e o botão "🗑" da UI.
+
+**Limitação aceita (mesma de sempre)**: linhas de vídeo nunca são
+auto-submetidas pelo robô (fase 3, sempre manual), então nunca ganham um
+número gravado na coluna — a proteção contra duplicata pra vídeo continua
+dependendo só da auditoria ao vivo. Planilhas geradas ANTES dessa mudança
+(sem a coluna "SNOW Entry #" no cabeçalho) continuam funcionando
+normalmente — a leitura/escrita usa a posição da coluna (17), não o texto
+do cabeçalho, só fica sem o rótulo bonito até reexportar do Módulo 23.
+
+## Histórico local (snow_submitted_rows.json) pode ficar desatualizado — SEÇÃO ANTIGA, substituída pela de cima
+
+Além da auditoria ao vivo, existe um segundo filtro independente: um
+arquivo local (`%APPDATA%/ArthwindSuite/snow_submitted_rows.json`) que
+marca linhas já submetidas por ESSA máquina em execuções anteriores. Esse
+histórico não é afetado pelos bugs acima (é uma fonte de dados totalmente
+separada) — se ele acumulou marcações erradas de testes anteriores (antes
+dos bugs serem corrigidos), pode continuar pulando linhas que na verdade
+não foram cadastradas. Botão "🗑" na UI (`handleClearHistory` →
+`snow_automation_clear_history` → `clearSubmittedRowsStore()`) apaga esse
+arquivo — use se o número de linhas puladas não bater com o que realmente
+está na tabela do ServiceNow mesmo depois da auditoria ao vivo estar
+correta.
+
+## Bug corrigido: defeito real com DF Start = 45 sendo confundido com vídeo na auditoria
+
+`scanCurrentListPage` (a auditoria ao vivo) decidia se um grupo de linhas da
+tabela "Damage Report Entries" era um grupo de **vídeo** (DF 45-50, sempre 4
+por pá) olhando só pro DF Start: `group[0].dfVal === '45'`. Só que DF 45
+também é um valor válido pra um defeito comum (foto), e nada impede um
+defeito real de cair exatamente nesse DF por coincidência.
+
+Em teste real apareceram 2 DAMs (DAM1118234, DAM1118235) que eram defeitos
+de verdade em DF 45 — não vídeos. A auditoria os tratava como grupo de
+vídeo e entrava no fluxo de desambiguação por anexo, que fica ~15s
+(30 tentativas x 500ms) procurando um `.mp4` que nunca existiria, porque
+esses DAMs não têm anexo de vídeo nenhum. Além do tempo desperdiçado, esses
+defeitos nunca eram confirmados como "já cadastrado" pela auditoria (o
+ramo de vídeo só grava chaves qualificadas por Section/Area, que um
+defeito comum nunca vai bater), arriscando reprocessamento indevido.
+
+**Causa raiz**: o que realmente identifica uma linha de vídeo não é o DF,
+é o Failure Type — todo vídeo tem sempre o mesmo valor fixo, "Type of
+failure is missing" (gravado assim pelo Módulo 23). Um defeito comum em
+DF 45 tem um Failure Type diferente (ex.: "Delamination", "Air
+inclusions" etc.).
+
+**Fix**: `isVideoDf` agora exige os dois critérios juntos:
+
+```ts
+const isVideoDf = group[0].dfVal === '45' && group[0].failureNorm === 'type of failure is missing'
+```
+
+(`failureNorm` já vinha sendo calculado por linha via `normalizeFailureType`
+pra outros fins — só precisou ser propagado pro tipo `RowInfo` e pro
+`isVideoDf`.) Grupos que não batem os dois critérios seguem o caminho
+normal de defeito (chave direta, sem leitura de anexo).
+
+## Debug: log das chaves calculadas pelo lado da tabela ao vivo
+
+Já existia um log `🔎 [debug] Vai processar: ... — chaves: ...` mostrando as
+chaves que a auditoria monta a partir da PLANILHA. Não existia o
+equivalente do lado da tabela ao vivo do ServiceNow — quando uma linha
+já cadastrada continuava marcada como "pendente", não dava pra saber se a
+chave lida ao vivo ficou diferente da esperada (Sub Component/Failure
+Type com texto levemente diferente, DF lido de coluna errada etc.) sem
+adivinhar. Adicionado `🔎 [debug] Já na tabela ao vivo: chave "..."` em
+`scanCurrentListPage`, logado pra toda linha não-vídeo já reconhecida
+como cadastrada — dá pra comparar os dois lados direto no log.
+
+## Bug corrigido: fila overnight ignorava mudança de "Submeter automaticamente" feita depois de montar a fila
+
+`headless`, `autoSubmit` e as 3 categorias (Defeitos/Blanks/Vídeos) são
+configurações GLOBAIS — um único checkbox no painel esquerdo, não um
+campo por turbina da fila. Mas `handleAddToQueue` gravava o valor desses
+campos DENTRO do item no momento do clique em "➕ Adicionar à fila"
+(`options: buildOptions()`), e `handleRunQueue` usava esse snapshot
+congelado (`item.options`) na hora de rodar.
+
+Fluxo típico que disparava o bug: montar a fila inteira com várias
+turbinas primeiro, e só depois marcar "Submeter formulário
+automaticamente" como último passo antes de clicar em "Rodar fila
+overnight" — a marcação era ignorada silenciosamente, e toda turbina da
+fila rodava em modo Conferência Manual (o valor que estava no checkbox
+quando cada item foi adicionado, geralmente `false`, o padrão).
+
+**Fix**: `handleRunQueue` agora monta as opções de cada rodada como
+`{ ...item.options, headless, autoSubmit, includeDefects, includeBlanks,
+includeVideos }` — os campos globais vêm sempre do estado ATUAL do
+checkbox, só `startRow`/`endRow` (esses sim por turbina) continuam vindo
+do snapshot do item.
+
+## Textos explicativos abaixo dos checkboxes de Submissão/Categorias removidos
+
+A pedido do usuário — não eram mais necessários depois das correções
+acima (o texto sobre "histórico local" já tinha sido corrigido antes,
+mas o pedido era remover os blocos inteiros, não só ajustar o texto).
+
+## Bug corrigido: fila overnight misturava turbina com a página da turbina anterior (Submissão Automática)
+
+Com "Submeter formulário automaticamente" ligado, o robô reaproveita uma
+aba já aberta do navegador em vez de abrir uma nova a cada linha
+(`context.pages().find((p) => !p.isClosed())` — ver comentário no
+código sobre por que isso é intencional só nesse modo). Antes de
+preencher, checava se já estava na página certa comparando só a base da
+URL, sem a query string: `targetPage.url().includes(incidentUrl.split('?')[0])`.
+
+Só que a URL do Inspection Report no ServiceNow é a MESMA base pra
+qualquer incidente (`.../inspection_report.do`) — o que muda entre
+turbinas é o `sys_id` na query string. Rodando a fila overnight com 2+
+turbinas, a aba reaproveitada da turbina anterior "parecia" já estar no
+lugar certo pra turbina seguinte (mesma base, `sys_id` diferente) e
+NUNCA navegava pra URL nova — a automação seguia preenchendo os dados da
+turbina 2 em cima da página ainda aberta da turbina 1, travando na
+seleção do Blade serial number (a pá da turbina 2 não existe no
+Inspection Report da turbina 1, então a verificação dupla de combobox —
+ver seção "Verificação de combobox virou dupla leitura" mais acima —
+corretamente nunca conseguia confirmar a seleção e acabava travando/
+falhando ali).
+
+**Fix**: a checagem agora compara a URL INTEIRA (`targetPage.url() !==
+incidentUrl`), não só a base antes do `?` — garante que toda troca de
+turbina force uma navegação de verdade pra URL certa antes de preencher
+qualquer coisa.
+
+## Modo Auditoria (dry run)
+
+Pedido do usuário: uma forma de só CONFERIR o que falta na planilha em
+relação ao que já está no ServiceNow, sem preencher nem abrir formulário
+nenhum — útil pra checar rápido antes de decidir se vale a pena rodar a
+automação de verdade.
+
+**Implementado**: nova opção `dryRun` em `RunAutomationOptions`. Roda
+exatamente a mesma sequência de sempre — leitura da planilha, auditoria
+ao vivo do ServiceNow (`auditLiveDamageEntries`), todos os filtros
+(pás selecionadas, categorias, já cadastrado ao vivo, Blank Image por
+contagem) — e só PÁRA logo antes da Fase 1 (o loop que efetivamente abre
+"Add Damage Entry" e preenche). Como é a mesma lógica de filtragem de uma
+execução real, a precisão do relatório é idêntica à de uma auditoria que
+de fato reprocessaria essas linhas.
+
+Loga um resumo (contagem por categoria) e a lista detalhada de cada linha
+faltando (pá, sub component, failure type, DF), e devolve o resultado com
+`dryRun: true` + `missingDefects`/`missingBlanks`/`missingVideos` em vez
+de preencher qualquer coisa.
+
+Novo checkbox "Modo Auditoria (dry run)" no painel — quando marcado,
+desabilita e ignora visualmente o checkbox "Submeter automaticamente"
+(não faz sentido os dois juntos, dry run nunca preenche nada pra
+submeter). Também passa pela fila overnight, do mesmo jeito que
+`autoSubmit`/categorias (usa o valor ATUAL do checkbox no momento de
+cada turbina rodar, não um snapshot congelado — ver seção da fila
+overnight mais acima).
+
+## Pacote standalone (CLI) pro time de dev
+
+Pedido do usuário: uma versão da automação que o time de dev pudesse
+rodar/revisar separada do Arthwind Suite (sem precisar abrir o app
+inteiro), continuando a existir normalmente dentro da Suite também.
+Empacotado como um script Node/TypeScript simples (`run.ts`), sem
+Electron/React — só a lógica de `snowAutomation.ts` +
+`snowProcessor.ts` (usado só pela `SnowMappings`) + as duas
+dependências que `snowProcessor.ts` puxa (`polygonUtils.ts`,
+`bladeSets.ts`), chamado via linha de comando. Ver `README.md` do
+pacote pra instruções de uso (inclui o modo `--dry-run`).

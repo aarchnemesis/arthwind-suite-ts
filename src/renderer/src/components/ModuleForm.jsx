@@ -11,6 +11,7 @@ import WorkflowModule from './WorkflowModule.jsx';
 import ReconstruirModule from './ReconstruirModule.jsx';
 import ArthnexUploaderModule from './ArthnexUploaderModule.jsx';
 import SnowModule from './SnowModule.jsx';
+import SnowAutomationModule from './SnowAutomationModule.jsx';
 
 export default function ModuleForm({
   T, D, lang, active, module,
@@ -66,6 +67,8 @@ export default function ModuleForm({
         <ReconstruirModule D={D} isPyWebView={isPyWebView} onOpenFolder={onOpenFolder} />
       ) : active === 23 ? (
         <SnowModule D={D} />
+      ) : active === 24 ? (
+        <SnowAutomationModule D={D} />
       ) : module.doc ? (
         <div style={{ paddingBottom: "20px" }}>
           {docContent[lang].map((d, i) => {

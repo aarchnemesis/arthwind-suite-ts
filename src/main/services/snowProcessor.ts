@@ -5,7 +5,7 @@ import http from 'http'
 import os from 'os'
 import ExcelJS from 'exceljs'
 import sharp from 'sharp'
-import { equirectPolygonToPinhole, renderEquirectPinhole } from './polygonUtils'
+import { equirectPolygonToPinhole, renderEquirectPinhole, equirectPolygonCenter } from './polygonUtils'
 import { getBladeInfo } from './bladeSets'
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
@@ -49,9 +49,13 @@ export class SnowMappings {
     'Damaged Laminate':                    'Type of Failure is Missing',
     'Wrinkle':                             'Waveness in the glassmaterial',
     'Gap':                                 'Deviation Core Material',
-    'Bubbles':                             'Air Inclusion',
+    // "Air Inclusion"/"Foreign Object" (singular) NÃO existem no dropdown real do SNOW
+    // — o rótulo de verdade lá é plural ("Air inclusions"/"Foreign objects"), achado
+    // comparando a planilha com a tabela ao vivo do ServiceNow (o robô nunca reconhecia
+    // esses defeitos como já cadastrados por causa do "s" a mais/a menos).
+    'Bubbles':                             'Air inclusions',
     'Semi dry glass':                      'Dry Laminate',
-    'Foreign Object':                      'Foreign Object',
+    'Foreign Object':                      'Foreign objects',
     'Bonding paste failure':               'Type of Failure is Missing',
     'Core Material Damaged':               'Deviation Core Material',
     'LPS Disconnected/Damaged':            'Type of Failure is Missing',
@@ -64,10 +68,19 @@ export class SnowMappings {
     'Others':                              'Type of Failure is Missing',
   }
 
-  static getFailure(original: string): string {
+  static getFailure(original: string, subComponent?: string): string {
     const key = (original || '').trim()
+    const sub = (subComponent || '').trim()
+
+    // Regra de negócio do cliente: "Air inclusion" com sub-componente "Web Laminate" não existe no SNOW.
+    // Nesses casos, altera para "Type of Failure is Missing".
+    if (/web\s*laminate/i.test(sub) && (/bubbles/i.test(key) || /air\s*inclusion/i.test(key))) {
+      return 'Type of Failure is Missing'
+    }
+
     return this.FAILURE_TYPES[key] ?? 'Type of Failure is Missing'
   }
+
 
   static getDamageDescription(bladeSn: string | number, originalFailure: string): string {
     const rawSn = String(bladeSn || '').replace(/^B/i, '').replace(/^0+/, '')
@@ -93,6 +106,107 @@ export class SnowMappings {
     if (s === 'CE') return 50
     if (s === 'TE') return 100
     return ''
+  }
+
+  // Fonte equirretangular fixa do Arthnex — mesma premissa validada na
+  // correção de posicionamento dos polígonos (85 pontos de calibração).
+  private static readonly EQUIRECT_SRC_WIDTH = 3840
+  // Abaixo disso a foto é GoPro fixa da raiz — a coordenada é pixel nativo,
+  // não equirretangular, então não dá pra calcular ângulo a partir dela.
+  private static readonly ROOT_LOCATION_THRESHOLD_M = 11
+
+  // Âncoras reais (Section+Side → zonas da tabela do cliente, com o ângulo
+  // onde cada uma foi confirmada). Extraídas de VSR05-06 pás 377/404/408 —
+  // ver docs/pd-from-coordinate.md. Cada zona SÓ entra aqui com âncora(s)
+  // real(is) confirmada(s); zonas sem referência ficam de fora (tratadas à
+  // parte, sem inventar um ângulo que não medimos).
+  //
+  // LE|SS: 3 referências independentes (ângulos bem diferentes entre si, de
+  // 101.9° a 140.7°) sempre confirmam PD 10 — a única zona possível pra esse
+  // lado na tabela do cliente (SS, transition to MG, 10-15%), sem depender
+  // do ângulo dentro dessa faixa.
+  //
+  // Section 2/SS tem uma segunda zona possível na tabela do cliente
+  // ("transition to MG", 40-45%) sem âncora real — busca em outras turbinas
+  // não trouxe uma (defeitos reais se repetem quase sempre nos mesmos
+  // pontos, a amostragem não cresce só olhando mais dados). Tende a ficar
+  // assim por um bom tempo; se algum dia aparecer um defeito real nessa
+  // zona, basta adicionar a entrada aqui que a escolha por proximidade
+  // passa a valer sozinha (pickNearestByAngle já suporta N âncoras).
+  private static readonly PD_ANCHORS: Record<string, { angleDeg: number; pd: number }[]> = {
+    'LE|SS': [
+      { angleDeg: 101.9, pd: 10 },
+      { angleDeg: 104.9, pd: 10 },
+      { angleDeg: 140.7, pd: 10 },
+    ],                                          // única zona possível: →MG (10-15%)
+    'CE|SS': [{ angleDeg: 41.5, pd: 55 }],       // →TEG (55-60%); →MG (40-45%) ainda sem âncora
+    'CE|PS': [{ angleDeg: 79.4, pd: 55 }],       // única zona possível: →TEG (55-60%)
+  }
+
+  private static pickNearestByAngle(
+    angleDeg: number,
+    anchors: { angleDeg: number; pd: number }[]
+  ): number {
+    let best = anchors[0]
+    let bestDelta = Math.abs(angleDeg - best.angleDeg)
+    for (const a of anchors.slice(1)) {
+      const delta = Math.abs(angleDeg - a.angleDeg)
+      if (delta < bestDelta) { best = a; bestDelta = delta }
+    }
+    return best.pd
+  }
+
+  /**
+   * Profile Depth (%) a partir da posição angular real do polígono na bolha
+   * equirretangular, em vez do valor fixo por região (getProfile). Calibrado
+   * com pontos de referência reais (VSR05-06, pás 377/404/408) cruzados com a
+   * especificação de PD% por posição do cliente — ver docs/pd-from-coordinate.md
+   * pro estudo completo (inclusive as zonas que ainda não têm referência real
+   * e por enquanto usam o valor mais próximo já validado).
+   *
+   * Cai no valor fixo antigo (getProfile) quando: Location < 11m (foto GoPro
+   * da raiz — coordenada não é equirretangular), polígono inválido, Section
+   * 3/TE (fora de escopo, "não trabalhamos"), ou Section 1/PS (2 zonas
+   * possíveis na tabela do cliente, sem nenhuma referência real ainda).
+   */
+  static getProfileFromCoordinates(
+    section: string,
+    side: string,
+    component: string,
+    coordinatesJson: string,
+    locationM: number
+  ): number | string {
+    const s = (section || '').trim().toUpperCase()
+    const c = (component || '').trim().toUpperCase()
+
+    // MSW (Main Shear Web / componente "MAIN WEB") tem PD fixo — único caso
+    // da tabela do cliente que não depende de seção, lado nem ângulo.
+    if (c === 'MAIN WEB') return 30
+
+    // Section 3/TE não é trabalhado hoje — mantém o valor antigo.
+    if (s !== 'LE' && s !== 'CE') return this.getProfile(section)
+
+    const points = parseCoordinates(coordinatesJson)
+    const isRootPhoto = locationM < this.ROOT_LOCATION_THRESHOLD_M
+    if (isRootPhoto || points.length < 3) {
+      return this.getProfile(section)
+    }
+
+    const sd = (side || '').trim().toUpperCase()
+    // Mesmo default de getBladeArea: qualquer side que não seja PS cai em SS.
+    const isPS = sd === 'PS'
+
+    // Section 1/PS: 2 zonas possíveis (edge 0-5%, →MG 10-15%) sem nenhuma
+    // referência real ainda — sem âncora, mantém o valor antigo.
+    if (s === 'LE' && isPS) return this.getProfile(section)
+
+    const anchors = this.PD_ANCHORS[`${s}|${isPS ? 'PS' : 'SS'}`]
+    if (!anchors || anchors.length === 0) return this.getProfile(section)
+
+    const center = equirectPolygonCenter(points, this.EQUIRECT_SRC_WIDTH)
+    const angleDeg = ((center.x / this.EQUIRECT_SRC_WIDTH) * 2 - 1) * 180
+
+    return this.pickNearestByAngle(angleDeg, anchors)
   }
 
   static getBladeSection(section: string): string {
@@ -512,9 +626,15 @@ const OUTPUT_HEADERS = [
   'Link das fotos',
   'Turbine SN',
   'POI',
+  'SNOW Entry #',
 ]
 
-const COLUMN_WIDTHS = [22, 28, 28, 55, 18, 18, 18, 18, 16, 18, 18, 18, 14, 50, 20, 15]
+// "SNOW Entry #" (coluna 17) é reservada aqui em branco de propósito — o Módulo 24
+// (snowAutomation.ts) escreve nela o número da entrada (ex.: "DAM1115650") assim que
+// confirma a submissão automática de uma linha. Vira a ÚNICA fonte de verdade de "essa
+// linha já foi submetida" — substitui o antigo histórico local em JSON
+// (snow_submitted_rows.json), que podia ficar desatualizado/discordar da planilha.
+const COLUMN_WIDTHS = [22, 28, 28, 55, 18, 18, 18, 18, 16, 18, 18, 18, 14, 50, 20, 15, 18]
 
 function toFloat(val: any): number | null {
   if (val === null || val === undefined || val === '') return null
@@ -644,6 +764,9 @@ export async function processSnowExcel(
   const photoDownloadQueue: DownloadParams[] = []
   const nameCounts = new Map<string, number>()
 
+  // Unique blades set for Video rows generation
+  const uniqueBladesMap = new Map<string, { fullBladeSerial: string; shortSn: string; setNumber: string }>()
+
   for (let rowNum = 2; rowNum <= inWs.rowCount; rowNum++) {
     const row = inWs.getRow(rowNum)
 
@@ -677,17 +800,29 @@ export async function processSnowExcel(
     const dfStart = round1(toFloat(dfStartRaw) ?? 0)
     const sizeMm  = toFloat(sizeMmRaw) ?? 0
 
-    const failureType   = SnowMappings.getFailure(origFail)
+    const subComponent  = SnowMappings.getSubComponent(component) // Dynamic component mapping!
+    const failureType   = SnowMappings.getFailure(origFail, subComponent)
     const damageDesc    = SnowMappings.getDamageDescription(bladeSn, origFail)
     const dfEnd         = SnowMappings.getDfEnd(dfStart, sizeMm)
-    const profileDepth  = SnowMappings.getProfile(section)
+    const profileDepth  = SnowMappings.getProfileFromCoordinates(
+      section, side, component, polygonRaw ? String(polygonRaw) : '', dfStart
+    )
     const bladeSection  = SnowMappings.getBladeSection(section)
     const bladeSubsec   = SnowMappings.getBladeSubsection(component)
     const bladeArea     = SnowMappings.getBladeArea(component, side)
-    const subComponent  = SnowMappings.getSubComponent(component) // Dynamic component mapping!
 
     const bladeInfo = getBladeInfo(bladeSn)
     const fullBladeSerial = bladeInfo.serial || String(bladeSn)
+    const paddedBladeSn = String(bladeSn).replace(/^B/i, '').padStart(4, '0')
+    const setNumberStr = bladeInfo.setNumber ? String(bladeInfo.setNumber).padStart(2, '0') : '00'
+
+    if (!uniqueBladesMap.has(paddedBladeSn)) {
+      uniqueBladesMap.set(paddedBladeSn, {
+        fullBladeSerial,
+        shortSn: paddedBladeSn,
+        setNumber: setNumberStr
+      })
+    }
 
     const dfStartStr = dfStart.toFixed(1)
     const dfEndStr   = dfEnd.toFixed(1)
@@ -713,7 +848,6 @@ export async function processSnowExcel(
       poi ?? null,               // P — POI
     ])
 
-
     // Apply soft red highlight if it's Delamination >= 45m
     if (SnowMappings.shouldHighlight(failureType, dfStart)) {
       newRow.eachCell((cell) => {
@@ -730,7 +864,6 @@ export async function processSnowExcel(
     // Enqueue photo download parameters with unique sequential pic names
     if (photoLink) {
       const areaCode = SnowMappings.areaToFileCode(bladeArea)
-      const paddedBladeSn = String(bladeSn).replace(/^B/i, '').padStart(4, '0')
       const bladeCode = `B${paddedBladeSn}`
 
       let secCode = 'S1'
@@ -754,6 +887,7 @@ export async function processSnowExcel(
       const pic1Name = `${baseName}_pic${pic1Index}.jpeg`
       const pic2Name = `${baseName}_pic${pic2Index}.jpeg`
 
+
       photoDownloadQueue.push({
         turbineSn,
         bladeSn: String(bladeSn),
@@ -771,6 +905,51 @@ export async function processSnowExcel(
       })
     } else {
       photosSkipped++
+    }
+  }
+
+  // Create empty Videos directory for turbine
+  const videosFolder = path.join(path.dirname(photosFolder), 'Videos')
+  fs.mkdirSync(videosFolder, { recursive: true })
+
+  // Add 4 Video rows per unique blade (S1 PS, S1 SS, S2 PS, S2 SS) with strict DF45-50 nomenclature
+  const videoVariants = [
+    { sec: 'Section 1', area: 'PS', secCode: 'S1', areaCode: 'PS' },
+    { sec: 'Section 1', area: 'SS', secCode: 'S1', areaCode: 'SS' },
+    { sec: 'Section 2', area: 'PS', secCode: 'S2', areaCode: 'PS' },
+    { sec: 'Section 2', area: 'SS', secCode: 'S2', areaCode: 'SS' }
+  ]
+
+  for (const [, bInfo] of uniqueBladesMap) {
+    const videoDamageDesc = [
+      'Inspection as per SN_241',
+      `Blade: S/N${bInfo.shortSn} Set ${bInfo.setNumber}`,
+      'Inspection number: 1',
+      'Type of Failure is Missing'
+    ].join('\n')
+
+    for (const v of videoVariants) {
+      const videoFileName = `B${bInfo.shortSn}_${v.secCode}_${v.areaCode}_DF45_DF50.mp4`
+
+
+      outWs.addRow([
+        bInfo.fullBladeSerial,         // A — Blade serial number
+        'Blade Inside - Shell',        // B — Sub Component
+        'Type of Failure is Missing',  // C — Failure Type
+        videoDamageDesc,               // D — Damage Description
+        45,                            // E — DF distance Start (STRICTLY 45)
+        50,                            // F — DF distance End (STRICTLY 50)
+        0,                             // G — Profile Depth Start
+        0,                             // H — Profile Depth End
+        'Inside',                      // I — Inside/Outside
+        v.sec,                         // J — Blade section ("Section 1" / "Section 2")
+        'Shell',                       // K — Blade sub-section
+        v.area,                        // L — Blade area ("PS" / "SS")
+        0,                             // M — Size mm
+        videoFileName,                 // N — Video filename requirement
+        null,                          // O — Turbine SN
+        null                           // P — POI
+      ])
     }
   }
 
@@ -795,6 +974,8 @@ export async function processSnowExcel(
       null,                             // P
     ])
   }
+
+
 
   // Save the Excel file
   sendLog(`Gravando planilha em: ${path.basename(outExcelPath)}...`)
