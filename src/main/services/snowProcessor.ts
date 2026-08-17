@@ -49,9 +49,13 @@ export class SnowMappings {
     'Damaged Laminate':                    'Type of Failure is Missing',
     'Wrinkle':                             'Waveness in the glassmaterial',
     'Gap':                                 'Deviation Core Material',
-    'Bubbles':                             'Air Inclusion',
+    // "Air Inclusion"/"Foreign Object" (singular) NÃO existem no dropdown real do SNOW
+    // — o rótulo de verdade lá é plural ("Air inclusions"/"Foreign objects"), achado
+    // comparando a planilha com a tabela ao vivo do ServiceNow (o robô nunca reconhecia
+    // esses defeitos como já cadastrados por causa do "s" a mais/a menos).
+    'Bubbles':                             'Air inclusions',
     'Semi dry glass':                      'Dry Laminate',
-    'Foreign Object':                      'Foreign Object',
+    'Foreign Object':                      'Foreign objects',
     'Bonding paste failure':               'Type of Failure is Missing',
     'Core Material Damaged':               'Deviation Core Material',
     'LPS Disconnected/Damaged':            'Type of Failure is Missing',
@@ -622,9 +626,15 @@ const OUTPUT_HEADERS = [
   'Link das fotos',
   'Turbine SN',
   'POI',
+  'SNOW Entry #',
 ]
 
-const COLUMN_WIDTHS = [22, 28, 28, 55, 18, 18, 18, 18, 16, 18, 18, 18, 14, 50, 20, 15]
+// "SNOW Entry #" (coluna 17) é reservada aqui em branco de propósito — o Módulo 24
+// (snowAutomation.ts) escreve nela o número da entrada (ex.: "DAM1115650") assim que
+// confirma a submissão automática de uma linha. Vira a ÚNICA fonte de verdade de "essa
+// linha já foi submetida" — substitui o antigo histórico local em JSON
+// (snow_submitted_rows.json), que podia ficar desatualizado/discordar da planilha.
+const COLUMN_WIDTHS = [22, 28, 28, 55, 18, 18, 18, 18, 16, 18, 18, 18, 14, 50, 20, 15, 18]
 
 function toFloat(val: any): number | null {
   if (val === null || val === undefined || val === '') return null

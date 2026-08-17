@@ -12,6 +12,7 @@ import type { DamageReportRow } from '../snowAutomation'
 export const vsr0507DamageRows: DamageReportRow[] = [
   {
     "bladeSerialNumber": "A1 811 0410 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Foreign Object",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0410 Set 0115\nInspection number: 1\nForeign Object",
@@ -31,6 +32,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0410 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Air Inclusion",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0410 Set 0115\nInspection number: 1\nBubbles",
@@ -50,6 +52,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0410 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Air Inclusion",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0410 Set 0115\nInspection number: 1\nBubbles",
@@ -69,6 +72,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0410 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Deviation Core Material",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0410 Set 0115\nInspection number: 1\nStep",
@@ -88,6 +92,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0410 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Air Inclusion",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0410 Set 0115\nInspection number: 1\nBubbles",
@@ -107,6 +112,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0410 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Delamination",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0410 Set 0115\nInspection number: 1\nDelamination",
@@ -126,6 +132,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0410 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Delamination",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0410 Set 0115\nInspection number: 1\nDelamination",
@@ -145,6 +152,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0410 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Delamination",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0410 Set 0115\nInspection number: 1\nDelamination",
@@ -164,6 +172,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0410 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Air Inclusion",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0410 Set 0115\nInspection number: 1\nBubbles",
@@ -183,6 +192,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0413 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Foreign Object",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0413 Set 0115\nInspection number: 1\nForeign Object",
@@ -202,6 +212,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0413 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Web Laminate",
     "failureType": "Delamination",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0413 Set 0115\nInspection number: 1\nDelamination",
@@ -221,6 +232,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0413 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Deviation Core Material",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0413 Set 0115\nInspection number: 1\nStep",
@@ -240,6 +252,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0413 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Web Laminate",
     "failureType": "Type of Failure is Missing",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0413 Set 0115\nInspection number: 1\nDamaged Laminate",
@@ -259,6 +272,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0413 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Delamination",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0413 Set 0115\nInspection number: 1\nDelamination",
@@ -278,6 +292,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0413 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Deviation Core Material",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0413 Set 0115\nInspection number: 1\nStep",
@@ -297,6 +312,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0413 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Web Laminate",
     "failureType": "Type of Failure is Missing",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0413 Set 0115\nInspection number: 1\nBonding Paste Failure",
@@ -316,6 +332,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0413 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Delamination",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0413 Set 0115\nInspection number: 1\nDelamination",
@@ -335,6 +352,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0413 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Deviation Core Material",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0413 Set 0115\nInspection number: 1\nStep",
@@ -354,6 +372,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0413 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Delamination",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0413 Set 0115\nInspection number: 1\nDelamination",
@@ -373,6 +392,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0413 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Web Laminate",
     "failureType": "Type of Failure is Missing",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0413 Set 0115\nInspection number: 1\nDamaged Laminate",
@@ -392,6 +412,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0413 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Deviation Core Material",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0413 Set 0115\nInspection number: 1\nStep",
@@ -411,6 +432,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0413 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Deviation Core Material",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0413 Set 0115\nInspection number: 1\nStep",
@@ -430,6 +452,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0413 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Delamination",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0413 Set 0115\nInspection number: 1\nDelamination",
@@ -449,6 +472,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0413 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Web Laminate",
     "failureType": "Type of Failure is Missing",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0413 Set 0115\nInspection number: 1\nSemi Dry Glass",
@@ -468,6 +492,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0413 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Web Laminate",
     "failureType": "Type of Failure is Missing",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0413 Set 0115\nInspection number: 1\nBonding Paste Failure",
@@ -487,6 +512,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0413 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Delamination",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0413 Set 0115\nInspection number: 1\nDelamination",
@@ -506,6 +532,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0413 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Air Inclusion",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0413 Set 0115\nInspection number: 1\nBubbles",
@@ -525,6 +552,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0413 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Type of Failure is Missing",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0413 Set 0115\nInspection number: 1\nSemi Dry Glass",
@@ -544,6 +572,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0414 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Air Inclusion",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0414 Set 0115\nInspection number: 1\nBubbles",
@@ -563,6 +592,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0414 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Foreign Object",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0414 Set 0115\nInspection number: 1\nForeign Object",
@@ -582,6 +612,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0414 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Web Laminate",
     "failureType": "Air Inclusion",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0414 Set 0115\nInspection number: 1\nBubbles",
@@ -601,6 +632,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0414 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Deviation Core Material",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0414 Set 0115\nInspection number: 1\nStep",
@@ -620,6 +652,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0414 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Deviation Core Material",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0414 Set 0115\nInspection number: 1\nStep",
@@ -639,6 +672,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0414 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Delamination",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0414 Set 0115\nInspection number: 1\nDelamination",
@@ -658,6 +692,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0414 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Web Laminate",
     "failureType": "Type of Failure is Missing",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0414 Set 0115\nInspection number: 1\nDamaged Laminate",
@@ -677,6 +712,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0414 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Delamination",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0414 Set 0115\nInspection number: 1\nDelamination",
@@ -696,6 +732,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0414 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Deviation Core Material",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0414 Set 0115\nInspection number: 1\nStep",
@@ -715,6 +752,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0414 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Deviation Core Material",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0414 Set 0115\nInspection number: 1\nStep",
@@ -734,6 +772,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0413 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Delamination",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0413 Set 0115\nInspection number: 1\nDelamination",
@@ -753,6 +792,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0410 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Delamination",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0410 Set 0115\nInspection number: 1\nDelamination",
@@ -772,6 +812,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0410 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Delamination",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0410 Set 0115\nInspection number: 1\nDelamination",
@@ -791,6 +832,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0410 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Delamination",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0410 Set 0115\nInspection number: 1\nDelamination",
@@ -810,6 +852,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0414 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Delamination",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0414 Set 0115\nInspection number: 1\nDelamination",
@@ -829,6 +872,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0414 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Delamination",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0414 Set 0115\nInspection number: 1\nDelamination",
@@ -848,6 +892,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0414 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Deviation Core Material",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0414 Set 0115\nInspection number: 1\nStep",
@@ -867,6 +912,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0414 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Type of Failure is Missing",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0414 Set 0115\nInspection number: 1\nSemi Dry Glass",
@@ -886,6 +932,7 @@ export const vsr0507DamageRows: DamageReportRow[] = [
   },
   {
     "bladeSerialNumber": "A1 811 0414 0115",
+    "excelRowIndex": 0,
     "subComponent": "Blade Inside - Shell",
     "failureType": "Delamination",
     "damageDescription": "Inspection as per SN_241\nBlade: S/N0414 Set 0115\nInspection number: 1\nDelamination",

@@ -14,9 +14,10 @@ export default function SnowAutomationModule({ D }) {
   const [incidentUrl, setIncidentUrl] = useState('');
   const [headless, setHeadless] = useState(false);
   const [autoSubmit, setAutoSubmit] = useState(false);
-  const [includeBlankImages, setIncludeBlankImages] = useState(false);
-  const [skipSubmitted, setSkipSubmitted] = useState(true);
-  const [processOnlyVideos, setProcessOnlyVideos] = useState(false);
+  const [dryRun, setDryRun] = useState(false);
+  const [includeDefects, setIncludeDefects] = useState(true);
+  const [includeBlanks, setIncludeBlanks] = useState(true);
+  const [includeVideos, setIncludeVideos] = useState(true);
   const [startRow, setStartRow] = useState('');
   const [endRow, setEndRow] = useState('');
 
@@ -26,6 +27,10 @@ export default function SnowAutomationModule({ D }) {
   const [loadingBlades, setLoadingBlades] = useState(false);
   const [loggingIn, setLoggingIn] = useState(false);
   const [running, setRunning] = useState(false);
+  const [queue, setQueue] = useState([]);
+  const [queueRunning, setQueueRunning] = useState(false);
+  const [queueIndex, setQueueIndex] = useState(-1);
+  const busy = running || queueRunning;
   const [ran, setRan] = useState(false);
   const [logs, setLogs] = useState([]);
   const [result, setResult] = useState(null);
@@ -130,6 +135,29 @@ export default function SnowAutomationModule({ D }) {
     setLogs((prev) => [...prev, { text: 'Sessão do navegador encerrada.', type: 'info' }]);
   };
 
+  const buildOptions = () => ({
+    headless,
+    selectedBlades,
+    localPhotosDir,
+    autoSubmit,
+    includeDefects,
+    includeBlanks,
+    includeVideos,
+    dryRun,
+    ...(startRow ? { startRow: parseInt(startRow, 10) } : {}),
+    ...(endRow ? { endRow: parseInt(endRow, 10) } : {}),
+  });
+
+  const resetTurbineForm = () => {
+    setExcelPath('');
+    setLocalPhotosDir('');
+    setIncidentUrl('');
+    setBlades([]);
+    setSelectedBlades([]);
+    setStartRow('');
+    setEndRow('');
+  };
+
   const handleRun = async () => {
     if (!excelPath || !incidentUrl.trim()) return;
 
@@ -138,27 +166,21 @@ export default function SnowAutomationModule({ D }) {
     setLogs([]);
     setResult(null);
 
-    const options = {
-      headless,
-      selectedBlades,
-      localPhotosDir,
-      autoSubmit,
-      includeBlankImages,
-      skipSubmitted,
-      processOnlyVideos,
-      ...(startRow ? { startRow: parseInt(startRow, 10) } : {}),
-      ...(endRow ? { endRow: parseInt(endRow, 10) } : {}),
-    };
-
-
-
-
+    const options = buildOptions();
 
 
     try {
       const res = await window.pywebview.api.snow_automation_run(excelPath, incidentUrl.trim(), options);
       setResult(res);
-      if (res.success) {
+      if (res.success && res.dryRun) {
+        const total = (res.missingDefects || 0) + (res.missingBlanks || 0) + (res.missingVideos || 0);
+        setLogs((prev) => [...prev, {
+          text: total === 0
+            ? `✓ Auditoria concluída: nada faltando.`
+            : `⚠ Auditoria concluída: ${total} item(ns) faltando (${res.missingDefects || 0} defeito(s), ${res.missingBlanks || 0} blank(s), ${res.missingVideos || 0} vídeo(s)).`,
+          type: total === 0 ? 'success' : 'warning'
+        }]);
+      } else if (res.success) {
         setLogs((prev) => [...prev, {
           text: `✓ Automação concluída: ${res.processed} ok, ${res.failed} falha(s).`,
           type: res.failed > 0 ? 'warning' : 'success'
@@ -172,6 +194,87 @@ export default function SnowAutomationModule({ D }) {
       setRunning(false);
       setRan(true);
     }
+  };
+
+  const handleAddToQueue = () => {
+    if (!excelPath || !incidentUrl.trim() || selectedBlades.length === 0) return;
+    const item = {
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      label: excelPath.split('\\').pop().split('/').pop(),
+      excelPath,
+      incidentUrl: incidentUrl.trim(),
+      bladeCount: selectedBlades.length,
+      options: buildOptions(),
+      status: 'pending', // pending | running | done | failed
+      result: null,
+    };
+    setQueue((prev) => [...prev, item]);
+    setLogs((prev) => [...prev, { text: `➕ Turbina adicionada à fila: ${item.label} (${item.bladeCount} pá(s)).`, type: 'info' }]);
+    resetTurbineForm();
+  };
+
+  const handleRemoveFromQueue = (id) => {
+    setQueue((prev) => prev.filter((q) => q.id !== id));
+  };
+
+  const handleRunQueue = async () => {
+    if (queue.length === 0 || busy) return;
+
+    setQueueRunning(true);
+    setRan(false);
+    setResult(null);
+    setLogs((prev) => [...prev, { text: `▶ Iniciando fila overnight com ${queue.length} turbina(s)...`, type: 'info' }]);
+
+    // Snapshot dos itens no momento do início — a fila roda sequencialmente, uma
+    // turbina de cada vez, começando a próxima só quando a anterior terminar por
+    // completo (mesma sessão/perfil de navegador, não dá pra rodar duas ao mesmo
+    // tempo). Um erro numa turbina NÃO para a fila — é rodada overnight, sem
+    // ninguém pra intervir — fica registrado no log e no status do item, e segue.
+    const items = queue;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      setQueueIndex(i);
+      setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: 'running' } : q)));
+      setLogs((prev) => [...prev, { text: `\n===== Turbina ${i + 1}/${items.length}: ${item.label} =====`, type: 'info' }]);
+
+      try {
+        // headless/autoSubmit/categorias são configurações GLOBAIS (um único
+        // checkbox no painel, não por turbina) — usa o valor ATUAL desses campos,
+        // não o snapshot congelado de quando a turbina foi adicionada à fila. Sem
+        // isso, marcar "Submeter automaticamente" DEPOIS de já ter montado a fila
+        // não tinha efeito nenhum: cada item rodava com o autoSubmit que estava
+        // marcado (ou não) no momento do "➕ Adicionar à fila", silenciosamente
+        // ignorando qualquer mudança feita depois. startRow/endRow continuam vindo
+        // do item (esses sim são por turbina).
+        const runOptions = { ...item.options, headless, autoSubmit, includeDefects, includeBlanks, includeVideos, dryRun }
+        const res = await window.pywebview.api.snow_automation_run(item.excelPath, item.incidentUrl, runOptions);
+        setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: res.success ? 'done' : 'failed', result: res } : q)));
+        if (res.success && res.dryRun) {
+          const total = (res.missingDefects || 0) + (res.missingBlanks || 0) + (res.missingVideos || 0);
+          setLogs((prev) => [...prev, {
+            text: total === 0
+              ? `✓ Turbina ${i + 1}/${items.length}: auditoria concluída, nada faltando.`
+              : `⚠ Turbina ${i + 1}/${items.length}: auditoria concluída, ${total} item(ns) faltando (${res.missingDefects || 0} defeito(s), ${res.missingBlanks || 0} blank(s), ${res.missingVideos || 0} vídeo(s)).`,
+            type: total === 0 ? 'success' : 'warning'
+          }]);
+        } else if (res.success) {
+          setLogs((prev) => [...prev, {
+            text: `✓ Turbina ${i + 1}/${items.length} concluída: ${res.processed} ok, ${res.failed} falha(s).`,
+            type: res.failed > 0 ? 'warning' : 'success'
+          }]);
+        } else {
+          setLogs((prev) => [...prev, { text: `✗ Turbina ${i + 1}/${items.length} falhou: ${res.error} — seguindo para a próxima.`, type: 'error' }]);
+        }
+      } catch (err) {
+        const msg = err.message || String(err);
+        setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: 'failed', result: { error: msg } } : q)));
+        setLogs((prev) => [...prev, { text: `✗ Turbina ${i + 1}/${items.length} erro crítico: ${msg} — seguindo para a próxima.`, type: 'error' }]);
+      }
+    }
+
+    setQueueIndex(-1);
+    setQueueRunning(false);
+    setLogs((prev) => [...prev, { text: `🏁 Fila overnight concluída — ${items.length} turbina(s) processada(s).`, type: 'success' }]);
   };
 
   const logColor = (type) => {
@@ -212,8 +315,8 @@ export default function SnowAutomationModule({ D }) {
           <div className="form-input-row">
             <div
               className={`input-field${excelPath ? " filled" : ""}`}
-              onClick={!running ? pickExcel : undefined}
-              style={{ cursor: running ? 'not-allowed' : 'pointer' }}
+              onClick={!busy ? pickExcel : undefined}
+              style={{ cursor: busy ? 'not-allowed' : 'pointer' }}
             >
               <span style={{ color: excelPath ? accent : D.textMuted, flexShrink: 0 }}>📁</span>
               <span className="input-field-text" title={excelPath || 'Selecione o arquivo .xlsx'}>
@@ -229,8 +332,8 @@ export default function SnowAutomationModule({ D }) {
           <div className="form-input-row">
             <div
               className={`input-field${localPhotosDir ? " filled" : ""}`}
-              onClick={!running ? pickPhotosDir : undefined}
-              style={{ cursor: running ? 'not-allowed' : 'pointer' }}
+              onClick={!busy ? pickPhotosDir : undefined}
+              style={{ cursor: busy ? 'not-allowed' : 'pointer' }}
             >
               <span style={{ color: localPhotosDir ? accent : D.textMuted, flexShrink: 0 }}>🖼️</span>
               <span className="input-field-text" title={localPhotosDir || 'Selecione a pasta Fotos/ (opcional)'}>
@@ -259,7 +362,7 @@ export default function SnowAutomationModule({ D }) {
                 <button
                   type="button"
                   onClick={selectAllBlades}
-                  disabled={running}
+                  disabled={busy}
                   style={{ background: 'none', border: 0, color: accent, cursor: 'pointer', fontSize: '10px', padding: 0 }}
                 >
                   Todas
@@ -268,7 +371,7 @@ export default function SnowAutomationModule({ D }) {
                 <button
                   type="button"
                   onClick={deselectAllBlades}
-                  disabled={running}
+                  disabled={busy}
                   style={{ background: 'none', border: 0, color: D.textMuted, cursor: 'pointer', fontSize: '10px', padding: 0 }}
                 >
                   Nenhuma
@@ -295,7 +398,7 @@ export default function SnowAutomationModule({ D }) {
                         padding: '6px 8px',
                         borderRadius: '6px',
                         border: `1px solid ${isChecked ? accent + '40' : D.borderLight}`,
-                        cursor: running ? 'not-allowed' : 'pointer'
+                        cursor: busy ? 'not-allowed' : 'pointer'
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -303,7 +406,7 @@ export default function SnowAutomationModule({ D }) {
                           type="checkbox"
                           checked={isChecked}
                           onChange={() => toggleBlade(b.bladeSerialNumber)}
-                          disabled={running}
+                          disabled={busy}
                         />
                         <span style={{ fontWeight: 600, color: D.textPrimary, fontSize: '11px' }}>
                           Pá S/N {b.shortSn}
@@ -328,7 +431,7 @@ export default function SnowAutomationModule({ D }) {
             type="text"
             value={incidentUrl}
             onChange={(e) => setIncidentUrl(e.target.value)}
-            disabled={running}
+            disabled={busy}
             placeholder="https://.../inspection_report.do?sys_id=..."
             style={{
               width: '100%',
@@ -347,7 +450,7 @@ export default function SnowAutomationModule({ D }) {
         <div style={{ display: 'flex', gap: '8px' }}>
           <button
             onClick={handleLogin}
-            disabled={loggingIn || running || !incidentUrl.trim()}
+            disabled={loggingIn || busy || !incidentUrl.trim()}
             style={{
               flex: 1,
               background: D.bgCard,
@@ -357,15 +460,15 @@ export default function SnowAutomationModule({ D }) {
               padding: '8px',
               fontSize: '12px',
               fontWeight: 500,
-              cursor: (loggingIn || running || !incidentUrl.trim()) ? 'not-allowed' : 'pointer',
-              opacity: (loggingIn || running || !incidentUrl.trim()) ? 0.6 : 1
+              cursor: (loggingIn || busy || !incidentUrl.trim()) ? 'not-allowed' : 'pointer',
+              opacity: (loggingIn || busy || !incidentUrl.trim()) ? 0.6 : 1
             }}
           >
             {loggingIn ? 'Abrindo...' : '🔑 Abrir p/ Login'}
           </button>
           <button
             onClick={handleCloseSession}
-            disabled={running}
+            disabled={busy}
             title="Encerra o navegador (não apaga a sessão salva)"
             style={{
               background: D.bgCard,
@@ -374,8 +477,8 @@ export default function SnowAutomationModule({ D }) {
               borderRadius: '8px',
               padding: '8px 10px',
               fontSize: '12px',
-              cursor: running ? 'not-allowed' : 'pointer',
-              opacity: running ? 0.6 : 1
+              cursor: busy ? 'not-allowed' : 'pointer',
+              opacity: busy ? 0.6 : 1
             }}
           >
             ✕
@@ -389,13 +492,13 @@ export default function SnowAutomationModule({ D }) {
             <input
               type="number" min="1" placeholder="Início"
               value={startRow} onChange={(e) => setStartRow(e.target.value)}
-              disabled={running}
+              disabled={busy}
               style={{ width: '50%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: '8px', border: `1px solid ${D.borderLight}`, background: D.bgCard, color: D.textPrimary, fontSize: '12px' }}
             />
             <input
               type="number" min="1" placeholder="Fim"
               value={endRow} onChange={(e) => setEndRow(e.target.value)}
-              disabled={running}
+              disabled={busy}
               style={{ width: '50%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: '8px', border: `1px solid ${D.borderLight}`, background: D.bgCard, color: D.textPrimary, fontSize: '12px' }}
             />
           </div>
@@ -407,24 +510,28 @@ export default function SnowAutomationModule({ D }) {
         {/* Headless, Submissão & Blank Image */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: D.textSecond, cursor: 'pointer' }}>
-            <input type="checkbox" checked={headless} onChange={(e) => setHeadless(e.target.checked)} disabled={running} />
+            <input type="checkbox" checked={headless} onChange={(e) => setHeadless(e.target.checked)} disabled={busy} />
             Rodar em segundo plano (sem mostrar o navegador)
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: D.textSecond, cursor: 'pointer' }}>
-            <input type="checkbox" checked={autoSubmit} onChange={(e) => setAutoSubmit(e.target.checked)} disabled={running} />
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: D.textSecond, cursor: dryRun ? 'not-allowed' : 'pointer', opacity: dryRun ? 0.5 : 1 }}>
+            <input type="checkbox" checked={autoSubmit} onChange={(e) => setAutoSubmit(e.target.checked)} disabled={busy || dryRun} />
             Submeter formulário automaticamente (desativado = apenas preenche)
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: D.textSecond, cursor: 'pointer' }}>
-            <input type="checkbox" checked={includeBlankImages} onChange={(e) => setIncludeBlankImages(e.target.checked)} disabled={running} />
-            Incluir 5 entradas "Blank Image" (para inspeções com menos de 5 defeitos)
+            <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} disabled={busy} />
+            Modo Auditoria (dry run — só verifica o que falta, não abre nem preenche formulário nenhum)
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: D.textSecond, cursor: 'pointer' }}>
-            <input type="checkbox" checked={skipSubmitted} onChange={(e) => setSkipSubmitted(e.target.checked)} disabled={running} />
-            Ignorar defeitos já submetidos no histórico (evita duplicatas ao reiniciar)
+            <input type="checkbox" checked={includeDefects} onChange={(e) => setIncludeDefects(e.target.checked)} disabled={busy} />
+            Defeitos
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: D.textSecond, cursor: 'pointer' }}>
-            <input type="checkbox" checked={processOnlyVideos} onChange={(e) => setProcessOnlyVideos(e.target.checked)} disabled={running} />
-            Processar APENAS Vídeos (DF 45-50) — ignora os defeitos normais
+            <input type="checkbox" checked={includeBlanks} onChange={(e) => setIncludeBlanks(e.target.checked)} disabled={busy} />
+            Blank Images
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: D.textSecond, cursor: 'pointer' }}>
+            <input type="checkbox" checked={includeVideos} onChange={(e) => setIncludeVideos(e.target.checked)} disabled={busy} />
+            Vídeos (DF 45-50)
           </label>
         </div>
 
@@ -434,25 +541,118 @@ export default function SnowAutomationModule({ D }) {
 
 
 
-        {/* Botão de Run */}
-        <button
-          onClick={handleRun}
-          disabled={running || !excelPath || !incidentUrl.trim() || selectedBlades.length === 0}
-          style={{
-            background: (running || selectedBlades.length === 0) ? D.bgHover : accent,
-            color: '#fff',
-            border: 0,
+        {/* Fila overnight — várias turbinas, uma de cada vez, sem precisar ficar por perto */}
+        {queue.length > 0 && (
+          <div style={{
+            background: D.bgCard,
+            border: `1px solid ${D.borderLight}`,
             borderRadius: '8px',
             padding: '10px',
-            fontSize: '13px',
-            fontWeight: 600,
-            cursor: (running || !excelPath || !incidentUrl.trim() || selectedBlades.length === 0) ? 'not-allowed' : 'pointer',
-            opacity: (running || !excelPath || !incidentUrl.trim() || selectedBlades.length === 0) ? 0.6 : 1,
-            marginTop: 'auto'
-          }}
-        >
-          {running ? 'Rodando...' : `▶ Rodar Automação (${selectedBlades.length} pá(s))`}
-        </button>
+            fontSize: '12px'
+          }}>
+            <div style={{ fontWeight: 600, color: D.textPrimary, marginBottom: '8px' }}>
+              Fila ({queue.length} turbina(s)):
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '160px', overflowY: 'auto' }}>
+              {queue.map((q, idx) => {
+                const icon = q.status === 'running' ? '▶' : q.status === 'done' ? '✓' : q.status === 'failed' ? '✗' : '⏳';
+                const color = q.status === 'running' ? accent : q.status === 'done' ? D.success : q.status === 'failed' ? D.error : D.textMuted;
+                return (
+                  <div key={q.id} style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '6px 8px', borderRadius: '6px', border: `1px solid ${D.borderLight}`,
+                    background: idx === queueIndex ? `${accent}10` : 'transparent'
+                  }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ color, fontWeight: 600, fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={q.label}>
+                        {icon} {q.label}
+                      </div>
+                      <div style={{ color: D.textMuted, fontSize: '10px' }}>
+                        {q.bladeCount} pá(s)
+                        {q.status === 'done' && q.result ? ` — ${q.result.processed} ok, ${q.result.failed} falha(s)` : ''}
+                        {q.status === 'failed' && q.result?.error ? ` — ${q.result.error}` : ''}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRemoveFromQueue(q.id)}
+                      disabled={busy}
+                      title="Remover da fila"
+                      style={{
+                        background: 'none', border: 0, color: D.textMuted, cursor: busy ? 'not-allowed' : 'pointer',
+                        fontSize: '12px', flexShrink: 0, marginLeft: '6px'
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Botões de ação */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: 'auto' }}>
+          <button
+            onClick={handleAddToQueue}
+            disabled={busy || !excelPath || !incidentUrl.trim() || selectedBlades.length === 0}
+            title="Adiciona esta turbina à fila e limpa o formulário pra configurar a próxima"
+            style={{
+              background: D.bgCard,
+              border: `1px solid ${accent}60`,
+              color: accent,
+              borderRadius: '8px',
+              padding: '9px',
+              fontSize: '12px',
+              fontWeight: 600,
+              cursor: (busy || !excelPath || !incidentUrl.trim() || selectedBlades.length === 0) ? 'not-allowed' : 'pointer',
+              opacity: (busy || !excelPath || !incidentUrl.trim() || selectedBlades.length === 0) ? 0.6 : 1
+            }}
+          >
+            ➕ Adicionar à Fila
+          </button>
+
+          {queue.length > 0 && (
+            <button
+              onClick={handleRunQueue}
+              disabled={busy}
+              style={{
+                background: queueRunning ? D.bgHover : '#7c3aed',
+                color: '#fff',
+                border: 0,
+                borderRadius: '8px',
+                padding: '10px',
+                fontSize: '13px',
+                fontWeight: 600,
+                cursor: busy ? 'not-allowed' : 'pointer',
+                opacity: busy && !queueRunning ? 0.6 : 1
+              }}
+            >
+              {queueRunning
+                ? `🌙 Rodando fila... (${queueIndex + 1}/${queue.length})`
+                : `🌙 Rodar Fila Overnight (${queue.length} turbina(s))`}
+            </button>
+          )}
+
+          <button
+            onClick={handleRun}
+            disabled={busy || !excelPath || !incidentUrl.trim() || selectedBlades.length === 0}
+            title="Roda só esta turbina agora, sem passar pela fila"
+            style={{
+              background: (busy || selectedBlades.length === 0) ? D.bgHover : accent,
+              color: '#fff',
+              border: 0,
+              borderRadius: '8px',
+              padding: '10px',
+              fontSize: '13px',
+              fontWeight: 600,
+              cursor: (busy || !excelPath || !incidentUrl.trim() || selectedBlades.length === 0) ? 'not-allowed' : 'pointer',
+              opacity: (busy || !excelPath || !incidentUrl.trim() || selectedBlades.length === 0) ? 0.6 : 1
+            }}
+          >
+            {running ? 'Rodando...' : `▶ Rodar Agora (${selectedBlades.length} pá(s))`}
+          </button>
+        </div>
       </div>
 
 
